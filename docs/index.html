@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Accountant</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 2rem;
+        background-color: #f8f9fa;
+        color: #212529;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 1.5rem;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #fff;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      input[type="file"] {
+        margin-bottom: 1rem;
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        row-gap: 0.5rem;
+        column-gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      .fields label {
+        text-align: right;
+        padding-right: 0.5rem;
+      }
+      .fields input,
+      .fields select {
+        padding: 0.25rem;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+      }
+      button {
+        padding: 0.5rem 1rem;
+        margin-top: 0.5rem;
+        border: none;
+        border-radius: 4px;
+        background-color: #007bff;
+        color: #fff;
+        cursor: pointer;
+      }
+      button:disabled {
+        background-color: #6c757d;
+        cursor: not-allowed;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+      }
+      th,
+      td {
+        padding: 0.5rem;
+        border: 1px solid #dee2e6;
+        text-align: left;
+      }
+      th {
+        background-color: #e9ecef;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Image Accountant</h1>
+      <input type="file" id="fileInput" accept="image/*" />
+      <div class="fields">
+        <label for="vendorInput">Vendor:</label>
+        <input id="vendorInput" type="text" />
+        <label for="dateInput">Date:</label>
+        <input id="dateInput" type="date" />
+        <label for="amountInput">Amount:</label>
+        <input id="amountInput" type="number" step="0.01" />
+        <label for="taxInput">Tax:</label>
+        <input id="taxInput" type="number" step="0.01" />
+        <label for="categoryInput">Category:</label>
+        <select id="categoryInput">
+          <option value="General">General</option>
+          <option value="Travel">Travel</option>
+          <option value="Meals">Meals</option>
+          <option value="Supplies">Supplies</option>
+          <option value="Fuel">Fuel</option>
+          <option value="Maintenance">Maintenance</option>
+        </select>
+      </div>
+      <button id="saveBtn" disabled>Save Entry</button>
+      <button id="exportBtn">Export to Excel</button>
+      <table id="entriesTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Vendor</th>
+            <th>Category</th>
+            <th>Amount</th>
+            <th>Tax</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <!-- Tesseract.js for OCR -->
+    <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
+    <!-- FileSaver for saving files -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script>
+      const fileInput = document.getElementById('fileInput');
+      const vendorInput = document.getElementById('vendorInput');
+      const dateInput = document.getElementById('dateInput');
+      const amountInput = document.getElementById('amountInput');
+      const taxInput = document.getElementById('taxInput');
+      const categoryInput = document.getElementById('categoryInput');
+      const saveBtn = document.getElementById('saveBtn');
+      const exportBtn = document.getElementById('exportBtn');
+      const entriesTableBody = document.querySelector('#entriesTable tbody');
+
+      let entries = [];
+
+      // Load existing entries from localStorage
+      function loadEntries() {
+        const stored = localStorage.getItem('image_accountant_entries');
+        if (stored) {
+          try {
+            entries = JSON.parse(stored);
+          } catch {
+            entries = [];
+          }
+        }
+        renderEntries();
+      }
+
+      // Save entries to localStorage
+      function saveEntries() {
+        localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
+      }
+
+      // Render the table
+      function renderEntries() {
+        entriesTableBody.innerHTML = '';
+        entries.forEach((entry, index) => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${entry.date || ''}</td>
+            <td>${entry.vendor || ''}</td>
+            <td>${entry.category || ''}</td>
+            <td>${entry.amount != null ? entry.amount.toFixed(2) : ''}</td>
+            <td>${entry.tax != null ? entry.tax.toFixed(2) : ''}</td>
+          `;
+          entriesTableBody.appendChild(row);
+        });
+      }
+
+      // Simple parsing of OCR text to fill fields
+      function parseReceipt(text) {
+        const lines = text
+          .split(/\r?\n/) // split on newline
+          .map(l => l.trim())
+          .filter(Boolean);
+        // Vendor: first line with some letters and not mostly numbers
+        let vendor = '';
+        for (const line of lines) {
+          if (/\D/.test(line) && line.length > 2) {
+            vendor = line;
+            break;
+          }
+        }
+        // Date: find dd/mm/yyyy or mm/dd/yyyy or yyyy-mm-dd
+        let dateMatch = null;
+        const dateRegexes = [
+          /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/, // e.g., 12/08/25 or 12-08-2025
+          /(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/,    // e.g., 2025-08-12
+        ];
+        outer: for (const regex of dateRegexes) {
+          for (const line of lines) {
+            const m = line.match(regex);
+            if (m) {
+              dateMatch = m[1];
+              break outer;
+            }
+          }
+        }
+        let dateISO = '';
+        if (dateMatch) {
+          // Normalize date to yyyy-MM-dd for input[type=date]
+          let parts;
+          if (/\d{4}[\/-]/.test(dateMatch)) {
+            parts = dateMatch.split(/[\/-]/);
+            dateISO = `${parts[0].padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+          } else {
+            parts = dateMatch.split(/[\/-]/);
+            // Assume day first if >12
+            let d1 = parseInt(parts[0], 10);
+            let m1 = parseInt(parts[1], 10);
+            let y1 = parts[2];
+            if (y1.length === 2) {
+              y1 = '20' + y1;
+            }
+            // if month > 12 then swap
+            if (m1 > 12) {
+              [d1, m1] = [m1, d1];
+            }
+            dateISO = `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
+          }
+        }
+        // Amount and tax: pick the largest numbers with decimals
+        let numbers = [];
+        const numRegex = /\d+\.\d{2}/g;
+        for (const line of lines) {
+          const matches = line.match(numRegex);
+          if (matches) {
+            numbers.push(...matches.map(n => parseFloat(n)));
+          }
+        }
+        numbers.sort((a, b) => a - b);
+        let amount = numbers.length ? numbers[numbers.length - 1] : null;
+        // Tax: look for lines containing tax or gst
+        let tax = null;
+        for (const line of lines) {
+          if (/\b(gst|tax|vat)\b/i.test(line)) {
+            const m = line.match(numRegex);
+            if (m) {
+              tax = parseFloat(m[m.length - 1]);
+              break;
+            }
+          }
+        }
+        if (tax === null && amount != null) {
+          // assume 10% tax
+          tax = parseFloat((amount * 0.1).toFixed(2));
+        }
+        return { vendor, dateISO, amount, tax };
+      }
+
+      // Handle file upload
+      fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        saveBtn.disabled = true;
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const imageData = reader.result;
+          // Run OCR
+          try {
+            const result = await Tesseract.recognize(imageData, 'eng', {
+              logger: m => {
+                // Optionally update progress
+                // console.log(m);
+              },
+            });
+            const text = result.data.text;
+            const { vendor, dateISO, amount, tax } = parseReceipt(text);
+            vendorInput.value = vendor;
+            dateInput.value = dateISO;
+            amountInput.value = amount != null ? amount : '';
+            taxInput.value = tax != null ? tax : '';
+            saveBtn.disabled = false;
+          } catch (err) {
+            console.error(err);
+            alert('Error during OCR. Please try again.');
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+
+      // Save entry
+      saveBtn.addEventListener('click', () => {
+        const entry = {
+          vendor: vendorInput.value.trim(),
+          date: dateInput.value,
+          amount: parseFloat(amountInput.value) || null,
+          tax: parseFloat(taxInput.value) || null,
+          category: categoryInput.value,
+        };
+        entries.push(entry);
+        saveEntries();
+        renderEntries();
+        // Clear fields
+        vendorInput.value = '';
+        dateInput.value = '';
+        amountInput.value = '';
+        taxInput.value = '';
+        categoryInput.value = 'General';
+        saveBtn.disabled = true;
+        fileInput.value = '';
+      });
+
+      // Export to Excel
+      exportBtn.addEventListener('click', () => {
+        if (entries.length === 0) {
+          alert('No entries to export.');
+          return;
+        }
+        const wsData = [
+          ['Date', 'Vendor', 'Category', 'Amount', 'Tax'],
+          ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax]),
+        ];
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        XLSX.utils.book_append_sheet(wb, ws, 'Receipts');
+        const wbout = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+        const blob = new Blob([wbout], { type: 'application/octet-stream' });
+        saveAs(blob, 'image-accountant-entries.xlsx');
+      });
+
+      // Initialize
+      loadEntries();
+    </script>
+  </body>
+</html>
