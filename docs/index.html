@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Image Accountant</title>
+   <title>Image Accountant</title>> 
+
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -129,6 +130,24 @@
       const entriesTableBody = document.querySelector('#entriesTable tbody');
 
       let entries = [];
+
+      // Update the Save button state based on input fields.
+      // The Save button should be enabled when the user has manually filled out
+      // at least the vendor, date and amount fields. Previously the Save button
+      // was only enabled after an OCR file scan; this prevented manual entry.
+      function updateSaveButton() {
+        const hasVendor = vendorInput.value.trim() !== '';
+        const hasDate = dateInput.value !== '';
+        const hasAmount = amountInput.value !== '';
+        // Enable save button if all three essential fields are provided
+        saveBtn.disabled = !(hasVendor && hasDate && hasAmount);
+      }
+
+      // Listen for user input on relevant fields to update the Save button.
+      [vendorInput, dateInput, amountInput].forEach(el => {
+        el.addEventListener('input', updateSaveButton);
+      });
+
 
       // Load existing entries from localStorage
       function loadEntries() {
@@ -269,6 +288,7 @@
             taxInput.value = tax != null ? tax : '';
             saveBtn.disabled = false;
           } catch (err) {
+               );
             console.error(err);
             alert('Error during OCR. Please try again.');
           }
@@ -296,6 +316,7 @@
         categoryInput.value = 'General';
         saveBtn.disabled = true;
         fileInput.value = '';
+        updateSaveButton();           
       });
 
       // Export to Excel
