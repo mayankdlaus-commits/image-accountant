@@ -1,395 +1,137 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Image Accountant</title>
-  <style>
-    :root { --bg:#f8f9fa; --fg:#212529; --muted:#6c757d; --border:#dee2e6; --card:#fff; --brand:#007bff;}
-    *{box-sizing:border-box}
-    body{margin:0;padding:2rem;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-    h1{margin:0 0 1.25rem;text-align:center}
-    .container{max-width:960px;margin:0 auto;background:var(--card);padding:1.25rem;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
-    .row{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}
-    .actions{margin:.5rem 0 1rem}
-    .hint{color:var(--muted);font-size:.9rem}
-    .grid{display:grid;grid-template-columns:140px 1fr;gap:.5rem .75rem;margin-top:1rem}
-    label{align-self:center;text-align:right;color:#444}
-    input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px}
-    button{appearance:none;border:0;padding:.55rem .9rem;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
-    button.secondary{background:#495057}
-    button.ghost{background:#e9ecef;color:#111}
-    button:disabled{background:var(--muted);cursor:not-allowed}
-    table{width:100%;border-collapse:collapse;margin-top:1rem}
-    th,td{padding:.6rem .5rem;border:1px solid var(--border);text-align:left}
-    th{background:#eef2f7}
-    .ok{color:#2f8f46;font-weight:600}.warn{color:#b35b00;font-weight:600}.bad{color:#b00020;font-weight:600}
-    .preview{max-height:240px;max-width:100%;object-fit:contain;border:1px dashed var(--border);border-radius:10px;padding:6px;background:#fff}
-    progress{width:220px;height:10px;border-radius:6px}
-    .col{display:flex;flex-direction:column;gap:.35rem}
-    .split { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-    .switch { display:inline-flex; align-items:center; gap:8px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Image Accountant</h1>
+<script>
+  // ---- ADD these top-level variables near your other globals:
+  let fileHandle = null;         // picker handle (when allowed)
+  let opfsFileHandle = null;     // OPFS fallback handle (no dialogs)
+  let useOPFS = JSON.parse(localStorage.getItem('ia_use_opfs') || 'false');
 
-    <div class="row actions">
-      <input type="file" id="fileInput" accept="image/*"/>
-      <img id="preview" class="preview" alt=""/>
-      <div class="col">
-        <progress id="ocrProgress" max="1" value="0" style="display:none"></progress>
-        <span id="ocrStatus" class="hint"></span>
-      </div>
-    </div>
+  // ---- OPFS helpers (fallback when picker is blocked)
+  async function ensureOPFSFile() {
+    // Create (or reopen) a persistent Excel file inside the origin’s private FS
+    // File name per year keeps it tidy.
+    const year = new Date().getFullYear();
+    const root = await navigator.storage.getDirectory();          // OPFS root
+    // Subfolder (optional)
+    const appDir = await root.getDirectoryHandle('image-accountant', { create: true });
+    opfsFileHandle = await appDir.getFileHandle(`entries-${year}.xlsx`, { create: true });
+    useOPFS = true;
+    localStorage.setItem('ia_use_opfs', 'true');
+  }
 
-    <div class="row actions split">
-      <button id="saveBtn" disabled>Save Entry</button>
-      <button id="exportBtn" class="secondary">Export to Excel</button>
-      <button id="connectFileBtn" class="ghost">Link Local File</button>
-      <span id="linkStatus" class="hint">No linked file</span>
-      <span class="switch">
-        <input type="checkbox" id="preprocessToggle" checked />
-        <label for="preprocessToggle" class="hint">Preprocess before OCR (recommended)</label>
-      </span>
-    </div>
+  async function writeOPFS(binaryArrayBuffer) {
+    if (!opfsFileHandle) await ensureOPFSFile();
+    const ws = await opfsFileHandle.createWritable();
+    await ws.write(binaryArrayBuffer);
+    await ws.close();
+  }
 
-    <div class="grid">
-      <label for="vendorInput">Vendor</label>
-      <input id="vendorInput" type="text" placeholder="e.g., Officeworks"/>
+  // ---- Status UI
+  function setLinkStatus(){
+    const linkStatus = document.getElementById('linkStatus');
+    const connectFileBtn = document.getElementById('connectFileBtn');
 
-      <label for="dateInput">Date</label>
-      <input id="dateInput" type="date"/>
-
-      <label for="amountInput">Total</label>
-      <input id="amountInput" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/>
-
-      <label for="taxInput">Tax</label>
-      <input id="taxInput" type="number" step="0.01" inputmode="decimal" placeholder="auto (10%) if empty"/>
-
-      <label for="categoryInput">Category</label>
-      <select id="categoryInput">
-        <option>General</option><option>Travel</option><option>Meals</option>
-        <option>Supplies</option><option>Fuel</option><option>Maintenance</option>
-      </select>
-    </div>
-
-    <table id="entriesTable">
-      <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Total</th><th>Tax</th></tr></thead>
-      <tbody></tbody>
-    </table>
-
-    <p class="hint" style="margin-top:.75rem">
-      Uses API Ninjas OCR. Replace <strong>700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel</strong> in the code. Free plan max image is 200KB (premium up to 5MB). :contentReference[oaicite:1]{index=1}
-    </p>
-  </div>
-
-  <!-- SheetJS for Excel -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
-  <!-- FileSaver (download fallback) -->
-  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-
-  <script>
-    // ====== CONFIG: Put your API Ninjas key here ======
-    const API_NINJAS_KEY = '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel'; // <-- replace with your key
-    const API_URL = 'https://api.api-ninjas.com/v1/imagetotext';
-
-    // ====== DOM
-    const fileInput       = document.getElementById('fileInput');
-    const preview         = document.getElementById('preview');
-    const ocrProgress     = document.getElementById('ocrProgress');
-    const ocrStatus       = document.getElementById('ocrStatus');
-    const preprocessToggle= document.getElementById('preprocessToggle');
-
-    const vendorInput     = document.getElementById('vendorInput');
-    const dateInput       = document.getElementById('dateInput');
-    const amountInput     = document.getElementById('amountInput');
-    const taxInput        = document.getElementById('taxInput');
-    const categoryInput   = document.getElementById('categoryInput');
-
-    const saveBtn         = document.getElementById('saveBtn');
-    const exportBtn       = document.getElementById('exportBtn');
-    const connectFileBtn  = document.getElementById('connectFileBtn');
-    const linkStatus      = document.getElementById('linkStatus');
-    const tbody           = document.querySelector('#entriesTable tbody');
-
-    // ====== Data
-    let entries = [];
-    let fileHandle = null;
-
-    // ====== UI helpers
-    function updateSaveButton() {
-      saveBtn.disabled = !(vendorInput.value.trim() && dateInput.value && amountInput.value);
-    }
-    [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
-
-    function loadEntries() {
-      const raw = localStorage.getItem('image_accountant_entries');
-      if (raw) { try { entries = JSON.parse(raw) || []; } catch { entries = []; } }
-      renderEntries();
-    }
-    function saveEntries() {
-      localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
-    }
-    function renderEntries() {
-      tbody.innerHTML = '';
-      for (const e of entries) {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          `<td>${e.date || ''}</td>
-           <td>${e.vendor || ''}</td>
-           <td>${e.category || ''}</td>
-           <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
-           <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
-        tbody.appendChild(tr);
-      }
-    }
-
-    // ====== Optional preprocessing (client-side) to improve OCR
-    async function preprocessToPNGBlob(imgFile) {
-      const imgURL = URL.createObjectURL(imgFile);
-      try {
-        const img = await new Promise((res, rej) => {
-          const im = new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=imgURL;
-        });
-
-        const MAX_SIDE = 2200;
-        const w = img.naturalWidth, h = img.naturalHeight;
-        const scale = Math.min(MAX_SIDE / Math.max(w, h), 3);
-        const cw = Math.round(w * Math.max(1, scale));
-        const ch = Math.round(h * Math.max(1, scale));
-
-        const c = document.createElement('canvas'); c.width = cw; c.height = ch;
-        const g = c.getContext('2d', { willReadFrequently: true });
-        g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-        g.drawImage(img, 0, 0, cw, ch);
-
-        // grayscale + contrast stretch
-        const imgData = g.getImageData(0,0,cw,ch), d = imgData.data;
-        let min=255, max=0;
-        for (let i=0;i<d.length;i+=4){ const gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; if(gray<min)min=gray; if(gray>max)max=gray; }
-        const spread=Math.max(1,max-min);
-        for (let i=0;i<d.length;i+=4){
-          let gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
-          gray=(gray-min)*(255/spread); const v=gray|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
-        }
-        g.putImageData(imgData,0,0);
-
-        // simple adaptive threshold
-        const src=g.getImageData(0,0,cw,ch), sd=src.data;
-        const out=g.createImageData(cw,ch), od=out.data;
-        const box=15, half=box>>1, W=cw, H=ch;
-        const S=new Uint32Array((W+1)*(H+1));
-        for(let y=1;y<=H;y++){
-          let rowsum=0, idx=y*(W+1);
-          for(let x=1;x<=W;x++){
-            const p=((y-1)*W+(x-1))<<2; rowsum+=sd[p]; S[idx+x]=S[(y-1)*(W+1)+x]+rowsum;
-          }
-        }
-        for(let y=0;y<H;y++){
-          const y0=Math.max(0,y-half), y1=Math.min(H-1,y+half);
-          for(let x=0;x<W;x++){
-            const x0=Math.max(0,x-half), x1=Math.min(W-1,x+half);
-            const count=(x1-x0+1)*(y1-y0+1);
-            const sum=S[(y1+1)*(W+1)+(x1+1)] + S[y0*(W+1)+x0] - S[y0*(W+1)+(x1+1)] - S[(y1+1)*(W+1)+x0];
-            const mean=sum/count; const pix=sd[((y*W)+x)<<2]; const v=pix<mean*0.93?0:255;
-            const q=((y*W)+x)<<2; od[q]=od[q+1]=od[q+2]=v; od[q+3]=255;
-          }
-        }
-        g.putImageData(out,0,0);
-
-        const blob = await new Promise(r => c.toBlob(r, 'image/png', 1));
-        return blob;
-      } finally {
-        URL.revokeObjectURL(imgURL);
-      }
-    }
-
-    // ====== OCR via API Ninjas
-    async function ocrWithApiNinjas(fileOrBlob) {
-      if (!API_NINJAS_KEY || API_NINJAS_KEY === 'YOUR_API_KEY_HERE') {
-        throw new Error('Missing API key. Open index.html and set API_NINJAS_KEY.');
-      }
-      const form = new FormData();
-      form.append('image', fileOrBlob, 'input.png'); // field name must be "image" :contentReference[oaicite:2]{index=2}
-
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'X-Api-Key': API_NINJAS_KEY },
-        body: form
-      });
-
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('Unauthorized (check API key).');
-        if (res.status === 413) throw new Error('Image too large for your plan (free: 200KB).'); // :contentReference[oaicite:3]{index=3}
-        const txt = await res.text().catch(()=> '');
-        throw new Error(`OCR error ${res.status}: ${txt || 'request failed'}`);
-      }
-      const data = await res.json(); // expected: [{text:"..." , ...}, ...]
-      const fullText = Array.isArray(data) ? data.map(o => o.text || '').join('\n') : '';
-      return fullText;
-    }
-
-    // ====== Keyword parsing (Vendor, Date, Total, Tax)
-    function parseFields(fullText){
-      const text = (fullText||'').replace(/[^\S\r\n]+/g,' ').trim();
-      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-
-      // Vendor: first meaningful top line not "Invoice"
-      let vendor='';
-      for (let i=0;i<Math.min(10,lines.length);i++){
-        const l = lines[i];
-        if (/^\s*invoice\b/i.test(l)) continue;
-        if (/[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) { vendor = l.replace(/\s{2,}.*/,''); break; }
-      }
-
-      const dateRegexes = [
-        /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/,
-        /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
-        /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[ ,.-]+(\d{4})\b/i,
-        /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i
-      ];
-      const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
-      let dateISO='';
-      outer: for (const rx of dateRegexes){
-        for (const l of lines){
-          const m = l.match(rx);
-          if (!m) continue;
-          if (rx===dateRegexes[0]) { const y=m[1], mo=m[2].padStart(2,'0'), d=m[3].padStart(2,'0'); dateISO=`${y}-${mo}-${d}`; break outer; }
-          if (rx===dateRegexes[1]) { let d=parseInt(m[1],10), mo=parseInt(m[2],10), y=m[3]; if(String(y).length===2) y='20'+y; if(mo>12){[d,mo]=[mo,d];} dateISO=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-          if (rx===dateRegexes[2]) { const d=m[1], mm=monthMap[m[2].slice(0,3).toLowerCase()], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-          { const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-        }
-      }
-
-      const moneyRx = /(?:[\$£€]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
-      let amount=null, tax=null;
-      for (let i=lines.length-1;i>=0;i--){
-        const l = lines[i];
-        if (/total\b/i.test(l) && !/sub\s*total/i.test(l)) {
-          const ms = l.match(moneyRx);
-          if (ms?.length) { amount = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
-        }
-      }
-      for (const l of lines){
-        if (/\b(tax|gst|vat|mwst)\b/i.test(l)) {
-          const ms = l.match(moneyRx);
-          if (ms?.length) { tax = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
-        }
-      }
-      if (amount==null){
-        const nums=[]; for (const l of lines){ const ms=l.match(moneyRx); if(ms) nums.push(...ms.map(s=>parseFloat(s.replace(/[^\d.]/g,'')))); }
-        nums.sort((a,b)=>a-b); if(nums.length) amount=nums[nums.length-1];
-      }
-      if (tax==null && amount!=null) tax = Number((amount*0.10).toFixed(2));
-      return { vendor, dateISO, amount, tax, raw:text };
-    }
-
-    // ====== File input → (optional preprocess) → OCR via API → parse
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files?.[0];
-      if (!file) return;
-
-      const url = URL.createObjectURL(file);
-      preview.src = url;
-
-      try {
-        ocrProgress.style.display=''; ocrProgress.value=0; ocrStatus.textContent='Uploading to OCR…';
-        // Preprocess to PNG (often improves results, but you can disable with toggle)
-        const toSend = preprocessToggle.checked ? (await preprocessToPNGBlob(file)) : file;
-
-        const text = await ocrWithApiNinjas(toSend);
-        ocrProgress.style.display='none'; ocrStatus.textContent='';
-
-        const { vendor, dateISO, amount, tax } = parseFields(text);
-        if (vendor) vendorInput.value = vendor;
-        if (dateISO) dateInput.value = dateISO;
-        if (amount!=null) amountInput.value = amount;
-        if (tax!=null)   taxInput.value = tax;
-        updateSaveButton();
-      } catch (e) {
-        console.error(e);
-        ocrProgress.style.display='none';
-        const msg = String(e.message||e);
-        let friendly = msg;
-        if (/Missing API key/i.test(msg)) friendly = 'Add your API Ninjas key in the code (API_NINJAS_KEY).';
-        else if (/Unauthorized/i.test(msg)) friendly = 'API key rejected (401). Check your key.';
-        else if (/Image too large/i.test(msg)) friendly = 'Image too large for your plan (free: 200KB). Try a smaller image.';
-        ocrStatus.textContent = friendly;
-        ocrStatus.className = 'hint bad';
-        alert('OCR failed: ' + friendly);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    });
-
-    // ====== Link a local Excel (optional, Chrome/Edge)
     const fsSupported = 'showSaveFilePicker' in window;
-    function setLinkStatus(){
-      if (!fsSupported){ linkStatus.textContent='Local file linking not supported in this browser'; linkStatus.className='hint warn'; connectFileBtn.style.display='none'; return; }
-      linkStatus.textContent = fileHandle ? 'Linked ✔' : 'No linked file';
-      linkStatus.className = fileHandle ? 'hint ok' : 'hint';
+    const opfsSupported = !!(navigator.storage && navigator.storage.getDirectory);
+
+    if (fileHandle) {
+      linkStatus.textContent = 'Linked ✔ (picker)';
+      linkStatus.className = 'hint ok';
+      connectFileBtn.style.display = '';
+      return;
     }
-    setLinkStatus();
-
-    async function connectLocalFile(){
-      if (!fsSupported){ alert('Use Chrome/Edge for local file linking.'); return; }
-      try{
-        fileHandle = await window.showSaveFilePicker({
-          suggestedName:'image-accountant-entries.xlsx',
-          types:[{description:'Excel', accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]
-        });
-        await updateLinkedFile();
-        setLinkStatus();
-        alert('Local file linked. New entries will update this file.');
-      }catch(err){ if(err?.name!=='AbortError'){ console.error(err); alert('Could not link file.'); } }
+    if (useOPFS && opfsSupported) {
+      linkStatus.textContent = 'Linked ✔ (browser storage)';
+      linkStatus.className = 'hint ok';
+      connectFileBtn.style.display = '';
+      return;
     }
-    connectFileBtn.addEventListener('click', connectLocalFile);
+    // Neither linked nor OPFS in use
+    if (!fsSupported && !opfsSupported) {
+      linkStatus.textContent = 'No linking available (will auto-download on save)';
+      linkStatus.className = 'hint warn';
+      connectFileBtn.style.display = 'none';
+    } else {
+      linkStatus.textContent = 'No linked file';
+      linkStatus.className = 'hint';
+      connectFileBtn.style.display = '';
+    }
+  }
 
-    async function updateLinkedFile(){
-      if (!fileHandle) return;
-      const wsData = [['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e=>[e.date,e.vendor,e.category,e.amount,e.tax])];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const wbout = XLSX.write(wb, {type:'array', bookType:'xlsx'});
-      const w = await fileHandle.createWritable(); await w.write(wbout); await w.close();
+  // ---- Try to link via picker; if blocked, fall back to OPFS
+  async function connectLocalFile(){
+    const connectFileBtn = document.getElementById('connectFileBtn');
+    connectFileBtn.disabled = true;
+    try{
+      if ('showSaveFilePicker' in window) {
+        try {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: 'image-accountant-entries.xlsx',
+            types: [{ description:'Excel',
+              accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']} }]
+          });
+          useOPFS = false;
+          localStorage.setItem('ia_use_opfs', 'false');
+          alert('Linked a local Excel with the system picker.');
+        } catch (err) {
+          // If the picker is blocked or user cancels, fall back to OPFS when possible
+          const name = err && (err.name || '');
+          const blocked = name === 'SecurityError' || name === 'NotAllowedError';
+          const opfsSupported = !!(navigator.storage && navigator.storage.getDirectory);
+          if (blocked && opfsSupported) {
+            await ensureOPFSFile();
+            alert('System picker blocked. Using browser storage (OPFS) instead.');
+          } else if (name === 'AbortError') {
+            // user cancelled; do nothing
+          } else {
+            console.error(err);
+            alert('Could not link file: ' + (err.message || err));
+          }
+        }
+      } else if (navigator.storage && navigator.storage.getDirectory) {
+        await ensureOPFSFile();
+        alert('Using browser storage (OPFS).');
+      } else {
+        alert('Linking not supported in this browser. We will auto-download on each save.');
+      }
+    } finally {
+      connectFileBtn.disabled = false;
+      setLinkStatus();
+      // Write current table immediately so the file exists
+      await updateLinkedFile();
+    }
+  }
+
+  // ---- Unified writer: prefer picker file; else OPFS; else auto-download
+  async function updateLinkedFile(){
+    // Build workbook from current entries (reuse your SheetJS logic)
+    const wsData = [['Date','Vendor','Category','Amount','Tax'],
+      ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
+    const wbout = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+
+    try {
+      if (fileHandle) {
+        const w = await fileHandle.createWritable();
+        await w.write(wbout);
+        await w.close();
+        return;
+      }
+      if (useOPFS && navigator.storage && navigator.storage.getDirectory) {
+        await writeOPFS(wbout);
+        return;
+      }
+    } catch (err) {
+      console.error('Writing linked file failed:', err);
+      // fall through to auto-download as last resort
     }
 
-    // ====== Save & Export
-    saveBtn.addEventListener('click', async () => {
-      const entry = {
-        vendor:(vendorInput.value||'').trim(),
-        date: dateInput.value||'',
-        amount: amountInput.value ? Number(amountInput.value) : null,
-        tax: taxInput.value ? Number(taxInput.value) : null,
-        category: categoryInput.value||'General'
-      };
-      entries.push(entry);
-      saveEntries();
-      renderEntries();
+    // Last resort: auto-download an updated copy so you always have one file on disk
+    saveAs(new Blob([wbout], { type:'application/octet-stream' }), 'image-accountant-entries.xlsx');
+  }
 
-      vendorInput.value=''; dateInput.value=''; amountInput.value='';
-      taxInput.value=''; categoryInput.value='General'; fileInput.value=''; preview.src='';
-      updateSaveButton();
+  // ---- Wire up the button (keep your existing event listener if present)
+  document.getElementById('connectFileBtn').addEventListener('click', connectLocalFile);
 
-      try{ await updateLinkedFile(); }catch(e){ console.error(e); alert('Could not update linked file.'); }
-    });
-
-    exportBtn.addEventListener('click', () => {
-      if (!entries.length){ alert('No entries to export.'); return; }
-      const wsData = [['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e=>[e.date,e.vendor,e.category,e.amount,e.tax])];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-      saveAs(new Blob([wbout], { type:'application/octet-stream' }), 'image-accountant-entries.xlsx');
-    });
-
-    // ====== Init
-    loadEntries();
-    updateSaveButton();
-  </script>
-</body>
-</html>
+  // ---- Call once on load to reflect current state
+  setLinkStatus();
+</script>
