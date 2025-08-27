@@ -75,7 +75,7 @@
     </table>
 
     <p class="hint" style="margin-top:.75rem">
-      Tip: Clear, straight photos (~300–450 DPI, high contrast) yield the best OCR. In Chrome/Edge you can link a local Excel file and we’ll keep appending to it.
+      Tip: Clear, straight photos (~300–450 DPI) yield the best OCR. In Chrome/Edge you can link a local Excel file and we’ll keep appending.
     </p>
   </div>
 
@@ -87,7 +87,7 @@
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 
   <script>
-    // --------- DOM
+    // DOM
     const fileInput       = document.getElementById('fileInput');
     const preview         = document.getElementById('preview');
     const ocrProgress     = document.getElementById('ocrProgress');
@@ -103,17 +103,17 @@
     const linkStatus      = document.getElementById('linkStatus');
     const tbody           = document.querySelector('#entriesTable tbody');
 
-    // --------- Data
+    // Data
     let entries = [];
-    let fileHandle = null; // File System Access API handle (session only)
+    let fileHandle = null;
 
-    // --------- Save button state
+    // Save button
     function updateSaveButton() {
       saveBtn.disabled = !(vendorInput.value.trim() && dateInput.value && amountInput.value);
     }
     [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
 
-    // --------- Persistence (localStorage)
+    // Persistence
     function loadEntries() {
       const raw = localStorage.getItem('image_accountant_entries');
       if (raw) { try { entries = JSON.parse(raw) || []; } catch { entries = []; } }
@@ -136,9 +136,9 @@
       }
     }
 
-    // --------- Image preprocessing (grayscale → contrast → adaptive threshold → upscale)
+    // ---------- Image preprocessing ----------
     function preprocessImageToDataURL(imgEl) {
-      const MAX_SIDE = 2200; // upscale target
+      const MAX_SIDE = 2200;
       const w = imgEl.naturalWidth, h = imgEl.naturalHeight;
       const scale = Math.min(MAX_SIDE / Math.max(w, h), 3);
       const cw = Math.round(w * Math.max(1, scale));
@@ -151,7 +151,7 @@
 
       const img = g.getImageData(0, 0, cw, ch), d = img.data;
 
-      // grayscale + global contrast stretch
+      // grayscale + contrast stretch
       let min=255, max=0;
       for (let i=0;i<d.length;i+=4){
         const gray = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
@@ -165,7 +165,7 @@
       }
       g.putImageData(img,0,0);
 
-      // Adaptive threshold (integral image, 15x15)
+      // Adaptive threshold (integral image)
       const src = g.getImageData(0,0,cw,ch), sd = src.data;
       const out = g.createImageData(cw,ch), od = out.data;
       const box=15, half=box>>1, W=cw, H=ch;
@@ -194,12 +194,17 @@
       return c.toDataURL('image/png');
     }
 
-    // --------- OCR helpers
+    // ---------- OCR helpers ----------
     function avgConfidence(words){ if(!words?.length) return 0; return words.reduce((s,w)=>s+(w.confidence||0),0)/words.length; }
 
     async function runOCR(dataURL, psm) {
       const { createWorker } = Tesseract;
+
+      // IMPORTANT: explicit CDN paths so the worker actually loads on static hosting
       const worker = await createWorker({
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/worker.min.js',
+        corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js',
+        langPath:   'https://tessdata.projectnaptha.com/5',
         logger: m => {
           if (m.status === 'recognizing text') {
             ocrProgress.style.display = '';
@@ -208,6 +213,7 @@
           }
         }
       });
+
       try{
         await worker.loadLanguage('eng');
         await worker.initialize('eng');
@@ -218,15 +224,19 @@
         });
         const res = await worker.recognize(dataURL);
         return res;
-      } finally { await worker.terminate(); }
+      } catch (e) {
+        throw e;
+      } finally {
+        await worker.terminate();
+      }
     }
 
-    // --------- Keyword parsing (Vendor, Date, Total, Tax)
+    // ---------- Keyword parsing ----------
     function parseFields(fullText){
       const text = fullText.replace(/[^\S\r\n]+/g,' ').trim();
       const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
 
-      // Vendor: first meaningful line near top that's not generic "Invoice"
+      // Vendor
       let vendor='';
       for (let i=0;i<Math.min(10,lines.length);i++){
         const l = lines[i];
@@ -234,7 +244,7 @@
         if (/[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) { vendor = l.replace(/\s{2,}.*/,''); break; }
       }
 
-      // Date: regexes (yyyy-mm-dd, dd/mm/yyyy, mm/dd/yyyy, month names)
+      // Date
       const dateRegexes = [
         /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/,
         /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
@@ -247,24 +257,16 @@
         for (const l of lines){
           const m = l.match(rx);
           if (!m) continue;
-          if (rx===dateRegexes[0]) { // yyyy-mm-dd
-            const y=m[1], mo=m[2].padStart(2,'0'), d=m[3].padStart(2,'0'); dateISO=`${y}-${mo}-${d}`; break outer;
-          } else if (rx===dateRegexes[1]) { // dd/mm/yyyy or mm/dd/yyyy
-            let d=parseInt(m[1],10), mo=parseInt(m[2],10), y=m[3]; if(String(y).length===2) y='20'+y; if(mo>12){[d,mo]=[mo,d];}
-            dateISO=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer;
-          } else if (rx===dateRegexes[2]) {
-            const d=m[1], mm=monthMap[m[2].slice(0,3).toLowerCase()], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer;
-          } else {
-            const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer;
-          }
+          if (rx===dateRegexes[0]) { const y=m[1], mo=m[2].padStart(2,'0'), d=m[3].padStart(2,'0'); dateISO=`${y}-${mo}-${d}`; break outer; }
+          if (rx===dateRegexes[1]) { let d=parseInt(m[1],10), mo=parseInt(m[2],10), y=m[3]; if(String(y).length===2) y='20'+y; if(mo>12){[d,mo]=[mo,d];} dateISO=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
+          if (rx===dateRegexes[2]) { const d=m[1], mm=monthMap[m[2].slice(0,3).toLowerCase()], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
+          { const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
         }
       }
 
       // Totals & tax
       const moneyRx = /(?:[\$£€]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
       let amount=null, tax=null;
-
-      // Prefer lines with TOTAL (last occurrence)
       for (let i=lines.length-1;i>=0;i--){
         const l = lines[i];
         if (/total\b/i.test(l) && !/sub\s*total/i.test(l)) {
@@ -272,29 +274,27 @@
           if (ms?.length) { amount = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
         }
       }
-      // Tax / GST / VAT
       for (const l of lines){
         if (/\b(tax|gst|vat|mwst)\b/i.test(l)) {
           const ms = l.match(moneyRx);
           if (ms?.length) { tax = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
         }
       }
-      // Fallback total: largest money value
       if (amount==null){
         const nums=[];
         for (const l of lines){ const ms=l.match(moneyRx); if(ms) nums.push(...ms.map(s=>parseFloat(s.replace(/[^\d.]/g,'')))); }
         nums.sort((a,b)=>a-b); if(nums.length) amount=nums[nums.length-1];
       }
-      // Fallback tax (10% heuristic)
       if (tax==null && amount!=null) tax = Number((amount*0.10).toFixed(2));
 
       return { vendor, dateISO, amount, tax, raw:text };
     }
 
-    // --------- File input → preprocess → OCR (two passes) → parse
+    // ---------- File input → preprocess → OCR (sequential) ----------
     fileInput.addEventListener('change', async () => {
       const file = fileInput.files?.[0];
       if (!file) return;
+
       const url = URL.createObjectURL(file);
       preview.src = url;
 
@@ -304,12 +304,17 @@
           const dataURL = preprocessImageToDataURL(img);
           ocrProgress.style.display=''; ocrStatus.textContent='Starting OCR…';
 
-          // Two passes: PSM 6 (uniform block) + PSM 4 (column), pick best by confidence
-          const [r6, r4] = await Promise.all([ runOCR(dataURL,6), runOCR(dataURL,4) ]);
-          ocrProgress.style.display='none'; ocrStatus.textContent='';
-          const best = avgConfidence(r6.data.words) >= avgConfidence(r4.data.words) ? r6 : r4;
+          // Run PSM 6 first; if confidence low, try PSM 4
+          const r6 = await runOCR(dataURL, 6);
+          let best = r6;
+          if (avgConfidence(r6.data.words) < 80) {
+            const r4 = await runOCR(dataURL, 4);
+            best = avgConfidence(r4.data.words) >= avgConfidence(r6.data.words) ? r4 : r6;
+          }
 
+          ocrProgress.style.display='none'; ocrStatus.textContent='';
           const { vendor, dateISO, amount, tax } = parseFields(best.data.text||'');
+
           if (vendor) vendorInput.value = vendor;
           if (dateISO) dateInput.value = dateISO;
           if (amount!=null) amountInput.value = amount;
@@ -317,16 +322,18 @@
           updateSaveButton();
         } catch (e) {
           console.error(e);
-          ocrProgress.style.display='none'; ocrStatus.textContent='';
-          alert('OCR failed. Try a clearer/straighter photo, or fill fields manually.');
+          ocrProgress.style.display='none';
+          ocrStatus.textContent='';
+          alert('OCR could not start. If this persists, your network may be blocking the worker files.');
         } finally {
           URL.revokeObjectURL(url);
         }
       };
+      img.onerror = () => { alert('Could not load image.'); };
       img.src = url;
     });
 
-    // --------- Optional: link a local Excel (Chrome/Edge)
+    // ---------- Link a local Excel (optional)
     const fsSupported = 'showSaveFilePicker' in window;
     function setLinkStatus(){
       if (!fsSupported){ linkStatus.textContent='Local file linking not supported in this browser'; linkStatus.className='hint warn'; connectFileBtn.style.display='none'; return; }
@@ -359,7 +366,7 @@
       const w = await fileHandle.createWritable(); await w.write(wbout); await w.close();
     }
 
-    // --------- Save & Export
+    // ---------- Save & Export ----------
     saveBtn.addEventListener('click', async () => {
       const entry = {
         vendor:(vendorInput.value||'').trim(),
@@ -389,7 +396,7 @@
       saveAs(new Blob([wbout], { type:'application/octet-stream' }), 'image-accountant-entries.xlsx');
     });
 
-    // --------- Init
+    // Init
     loadEntries();
     updateSaveButton();
   </script>
