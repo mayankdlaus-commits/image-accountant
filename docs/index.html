@@ -1,447 +1,335 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Image Accountant</title>
-  <style>
-    :root { --bg:#f8f9fa; --fg:#212529; --muted:#6c757d; --border:#dee2e6; --card:#fff; --brand:#007bff;}
-    *{box-sizing:border-box}
-    body{margin:0;padding:2rem;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-    h1{margin:0 0 1.25rem;text-align:center}
-    .container{max-width:960px;margin:0 auto;background:var(--card);padding:1.25rem;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
-    .row{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}
-    .actions{margin:.5rem 0 1rem}
-    .hint{color:var(--muted);font-size:.9rem}
-    .grid{display:grid;grid-template-columns:140px 1fr;gap:.5rem .75rem;margin-top:1rem}
-    label{align-self:center;text-align:right;color:#444}
-    input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px}
-    button{appearance:none;border:0;padding:.55rem .9rem;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
-    button.secondary{background:#495057}
-    button.ghost{background:#e9ecef;color:#111}
-    button:disabled{background:var(--muted);cursor:not-allowed}
-    table{width:100%;border-collapse:collapse;margin-top:1rem}
-    th,td{padding:.6rem .5rem;border:1px solid var(--border);text-align:left}
-    th{background:#eef2f7}
-    .ok{color:#2f8f46;font-weight:600}.warn{color:#b35b00;font-weight:600}.bad{color:#b00020;font-weight:600}
-    .preview{max-height:240px;max-width:100%;object-fit:contain;border:1px dashed var(--border);border-radius:10px;padding:6px;background:#fff}
-    progress{width:220px;height:10px;border-radius:6px}
-    .col{display:flex;flex-direction:column;gap:.35rem}
-    .split { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-    .switch { display:inline-flex; align-items:center; gap:8px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Image Accountant</h1>
+# Create an upgraded version of the repo with improved OCR quality:
+# - Deep multipass (angles 0/90/270 x raw/gray/thresh) and heuristic best-pick
+# - AU-aware parsing (ABN, GST, invoice #, payment method)
+# - Raw OCR debug panel + Copy button
+# - Same secure Node proxy
+import os, json, textwrap, shutil, pathlib
 
-    <!-- API key save/load UI (stored locally, never hardcoded) -->
-    <div class="row actions" style="justify-content:space-between; align-items:center">
-      <div class="col" style="flex:1; min-width:260px">
-        <label for="apiKeyInput" class="hint">API Ninjas Key (stored locally in this browser)</label>
-        <input id="apiKeyInput" type="password" placeholder="Paste your API key"/>
-      </div>
-      <div class="col" style="align-items:flex-start">
-        <button id="saveKeyBtn" class="ghost">Save Key</button>
-        <span id="keyStatus" class="hint"></span>
-      </div>
-    </div>
+root = "/mnt/data/image-accountant-proxy-v2"
+public_dir = os.path.join(root, "public")
+os.makedirs(public_dir, exist_ok=True)
 
-    <div class="row actions">
-      <input type="file" id="fileInput" accept="image/*"/>
-      <img id="preview" class="preview" alt=""/>
-      <div class="col">
-        <progress id="ocrProgress" max="1" value="0" style="display:none"></progress>
-        <span id="ocrStatus" class="hint"></span>
-      </div>
-    </div>
+server_js = textwrap.dedent("""\
+    // server.js — Secure OCR proxy + static hosting for Image Accountant (v2)
+    import 'dotenv/config';
+    import express from 'express';
+    import cors from 'cors';
+    import multer from 'multer';
 
-    <div class="row actions split">
-      <button id="saveBtn" disabled>Save Entry</button>
-      <button id="exportBtn" class="secondary">Export to Excel</button>
-      <button id="exportPdfBtn" class="secondary">Export to PDF</button>
-      <button id="connectFileBtn" class="ghost">Link Local File</button>
-      <span id="linkStatus" class="hint">No linked file</span>
-      <span class="switch">
-        <input type="checkbox" id="preprocessToggle" checked />
-        <label for="preprocessToggle" class="hint">Preprocess before OCR (recommended)</label>
-      </span>
-    </div>
+    // Node 18+ has global fetch / FormData / Blob
+    const app = express();
+    const upload = multer({ limits: { fileSize: 8 * 1024 * 1024 } }); // 8 MB cap
 
-    <div class="grid">
-      <label for="vendorInput">Vendor</label>
-      <input id="vendorInput" type="text" placeholder="e.g., Officeworks"/>
+    // Serve static assets (place index.html under /public)
+    app.use(cors());
+    app.use(express.static('public'));
 
-      <label for="dateInput">Date</label>
-      <input id="dateInput" type="date"/>
+    app.get('/health', (_req, res) => res.json({ ok: true }));
 
-      <label for="amountInput">Total</label>
-      <input id="amountInput" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/>
-
-      <label for="taxInput">Tax</label>
-      <input id="taxInput" type="number" step="0.01" inputmode="decimal" placeholder="auto (10%) if empty"/>
-
-      <label for="categoryInput">Category</label>
-      <select id="categoryInput">
-        <option>General</option><option>Travel</option><option>Meals</option>
-        <option>Supplies</option><option>Fuel</option><option>Maintenance</option>
-      </select>
-    </div>
-
-    <table id="entriesTable">
-      <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Total</th><th>Tax</th></tr></thead>
-      <tbody></tbody>
-    </table>
-
-    <p class="hint" style="margin-top:.75rem">
-      OCR via API Ninjas Image-to-Text. Paste your key above and click <strong>Save Key</strong>.
-      For locked-down environments, we store a rolling Excel in the browser (OPFS) and PDF export is always available.
-    </p>
-  </div>
-
-  <!-- SheetJS for Excel -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
-  <!-- FileSaver for downloads -->
-  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-  <!-- jsPDF + AutoTable for PDF export -->
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-
-  <script>
-    // ====== CONFIG (no hardcoded secret) ======
-    const API_URL = 'https://api.api-ninjas.com/v1/imagetotext';
-
-    function getApiKey(){ return (localStorage.getItem('ia_api_key') || '').trim(); }
-    function setApiKey(k){ localStorage.setItem('ia_api_key', (k||'').trim()); }
-
-    // ====== DOM
-    const fileInput        = document.getElementById('fileInput');
-    const preview          = document.getElementById('preview');
-    const ocrProgress      = document.getElementById('ocrProgress');
-    const ocrStatus        = document.getElementById('ocrStatus');
-    const preprocessToggle = document.getElementById('preprocessToggle');
-
-    const apiKeyInput      = document.getElementById('apiKeyInput');
-    const saveKeyBtn       = document.getElementById('saveKeyBtn');
-    const keyStatus        = document.getElementById('keyStatus');
-
-    const vendorInput      = document.getElementById('vendorInput');
-    const dateInput        = document.getElementById('dateInput');
-    const amountInput      = document.getElementById('amountInput');
-    const taxInput         = document.getElementById('taxInput');
-    const categoryInput    = document.getElementById('categoryInput');
-
-    const saveBtn          = document.getElementById('saveBtn');
-    const exportBtn        = document.getElementById('exportBtn');
-    const exportPdfBtn     = document.getElementById('exportPdfBtn');
-    const connectFileBtn   = document.getElementById('connectFileBtn');
-    const linkStatus       = document.getElementById('linkStatus');
-    const tbody            = document.querySelector('#entriesTable tbody');
-
-    // ====== Data
-    let entries = [];
-
-    // ---- File linking state: picker / OPFS / fallback
-    let fileHandle = null;         // native picker handle
-    let opfsFileHandle = null;     // OPFS handle (browser storage)
-    let useOPFS = JSON.parse(localStorage.getItem('ia_use_opfs') || 'false');
-
-    // ====== UI helpers
-    function refreshKeyUI(){
-      const hasKey = !!getApiKey();
-      keyStatus.textContent = hasKey ? 'Key saved ✔' : 'No key saved';
-      keyStatus.className = 'hint ' + (hasKey ? 'ok' : 'warn');
-      if (hasKey) apiKeyInput.value = '********';
-    }
-
-    function updateSaveButton(){
-      saveBtn.disabled = !(vendorInput.value.trim() && dateInput.value && amountInput.value);
-    }
-    [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
-
-    function loadEntries(){
-      const raw = localStorage.getItem('image_accountant_entries');
-      if (raw) { try { entries = JSON.parse(raw) || []; } catch { entries = []; } }
-      renderEntries();
-    }
-    function saveEntries(){ localStorage.setItem('image_accountant_entries', JSON.stringify(entries)); }
-    function renderEntries(){
-      tbody.innerHTML = '';
-      for (const e of entries) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${e.date || ''}</td>
-          <td>${e.vendor || ''}</td>
-          <td>${e.category || ''}</td>
-          <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
-          <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
-        tbody.appendChild(tr);
-      }
-    }
-
-    // ====== Optional preprocessing (client-side) to improve OCR
-    async function preprocessToPNGBlob(imgFile){
-      const imgURL = URL.createObjectURL(imgFile);
+    // Secure OCR proxy: keeps your API key on the server
+    app.post('/ocr', upload.single('image'), async (req, res) => {
       try {
-        const img = await new Promise((res, rej) => { const im = new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=imgURL; });
-        const MAX_SIDE = 2200;
-        const w = img.naturalWidth, h = img.naturalHeight;
-        const scale = Math.min(MAX_SIDE / Math.max(w, h), 3);
-        const cw = Math.round(w * Math.max(1, scale));
-        const ch = Math.round(h * Math.max(1, scale));
-        const c = document.createElement('canvas'); c.width = cw; c.height = ch;
-        const g = c.getContext('2d', { willReadFrequently: true });
-        g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-        g.drawImage(img, 0, 0, cw, ch);
-        const imgData = g.getImageData(0,0,cw,ch), d = imgData.data;
-        let min=255, max=0;
-        for (let i=0;i<d.length;i+=4){ const gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; if(gray<min)min=gray; if(gray>max)max=gray; }
-        const spread=Math.max(1,max-min);
-        for (let i=0;i<d.length;i+=4){ let gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; gray=(gray-min)*(255/spread); const v=gray|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
-        g.putImageData(imgData,0,0);
-        const src=g.getImageData(0,0,cw,ch), sd=src.data;
-        const out=g.createImageData(cw,ch), od=out.data;
-        const box=15, half=box>>1, W=cw, H=ch;
-        const S=new Uint32Array((W+1)*(H+1));
-        for(let y=1;y<=H;y++){
-          let rowsum=0, idx=y*(W+1);
-          for(let x=1;x<=W;x++){
-            const p=((y-1)*W+(x-1))<<2; rowsum+=sd[p]; S[idx+x]=S[(y-1)*(W+1)+x]+rowsum;
-          }
+        if (!process.env.API_NINJAS_KEY) {
+          return res.status(500).send('Server missing API_NINJAS_KEY');
         }
-        for(let y=0;y<H;y++){
-          const y0=Math.max(0,y-half), y1=Math.min(H-1,y+half);
-          for(let x=0;x<W;x++){
-            const x0=Math.max(0,x-half), x1=Math.min(W-1,x+half);
-            const count=(x1-x0+1)*(y1-y0+1);
-            const sum=S[(y1+1)*(W+1)+(x1+1)] + S[y0*(W+1)+x0] - S[y0*(W+1)+(x1+1)] - S[(y1+1)*(W+1)+x0];
-            const mean=sum/count; const pix=sd[((y*W)+x)<<2]; const v=pix<mean*0.93?0:255;
-            const q=((y*W)+x)<<2; od[q]=od[q+1]=od[q+2]=v; od[q+3]=255;
-          }
+        if (!req.file) {
+          return res.status(400).send('No file uploaded under field name "image".');
         }
-        g.putImageData(out,0,0);
-        const blob = await new Promise(r => c.toBlob(r, 'image/png', 0.92));
-        return blob;
-      } finally { URL.revokeObjectURL(imgURL); }
-    }
 
-    // ====== OCR via API Ninjas (reads key from localStorage)
-    async function ocrWithApiNinjas(fileOrBlob){
-      const key = getApiKey();
-      if (!key) throw new Error('No API key is saved. Paste your key and click "Save Key".');
-      const form = new FormData();
-      form.append('image', fileOrBlob, 'input.png');
-      const res = await fetch(API_URL, { method: 'POST', headers: { 'X-Api-Key': key }, body: form });
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('API key rejected (401 Unauthorized). Double-check the key.');
-        if (res.status === 413) throw new Error('Image too large for your plan (413). Try a smaller image.');
-        const txt = await res.text().catch(()=> '');
-        throw new Error(`OCR error ${res.status}: ${txt || 'request failed'}`);
-      }
-      const data = await res.json();
-      const fullText = Array.isArray(data) ? data.map(o => o.text || '').join('\n') : '';
-      return fullText;
-    }
+        const form = new FormData();
+        const blob = new Blob([req.file.buffer], {
+          type: req.file.mimetype || 'application/octet-stream'
+        });
+        form.append('image', blob, req.file.originalname || 'input.png');
 
-    // ====== Keyword parsing (Vendor, Date, Total, Tax)
-    function parseFields(fullText){
-      const text = (fullText||'').replace(/[^\S\r\n]+/g,' ').trim();
-      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-      let vendor='';
-      for (let i=0;i<Math.min(10,lines.length);i++){
-        const l = lines[i];
-        if (/^\s*invoice\b/i.test(l)) continue;
-        if (/[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) { vendor = l.replace(/\s{2,}.*/, ''); break; }
-      }
-      const dateRegexes = [
-        /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/,
-        /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
-        /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[ ,.-]+(\d{4})\b/i,
-        /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i
-      ];
-      const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
-      let dateISO='';
-      outer: for (const rx of dateRegexes){
-        for (const l of lines){
-          const m = l.match(rx);
-          if (!m) continue;
-          if (rx===dateRegexes[0]) { const y=m[1], mo=m[2].padStart(2,'0'), d=m[3].padStart(2,'0'); dateISO=`${y}-${mo}-${d}`; break outer; }
-          if (rx===dateRegexes[1]) { let d=parseInt(m[1],10), mo=parseInt(m[2],10), y=m[3]; if(String(y).length===2) y='20'+y; if(mo>12){[d,mo]=[mo,d];} dateISO=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-          if (rx===dateRegexes[2]) { const d=m[1], mm=monthMap[m[2].slice(0,3).toLowerCase()], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-          { const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-        }
-      }
-      const moneyRx = /(?:[\$£€]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
-      let amount=null, tax=null;
-      for (let i=lines.length-1;i>=0;i--){
-        const l = lines[i];
-        if (/total\b/i.test(l) && !/sub\s*total/i.test(l)) {
-          const ms = l.match(moneyRx);
-          if (ms?.length) { amount = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
-        }
-      }
-      for (const l of lines){
-        if (/\b(tax|gst|vat|mwst)\b/i.test(l)) {
-          const ms = l.match(moneyRx);
-          if (ms?.length) { tax = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
-        }
-      }
-      if (amount==null){
-        const nums=[]; for (const l of lines){ const ms=l.match(moneyRx); if(ms) nums.push(...ms.map(s=>parseFloat(s.replace(/[^\d.]/g,'')))); }
-        nums.sort((a,b)=>a-b); if(nums.length) amount=nums[nums.length-1];
-      }
-      if (tax==null && amount!=null) tax = Number((amount*0.10).toFixed(2));
-      return { vendor, dateISO, amount, tax, raw:text };
-    }
+        const upstream = await fetch('https://api.api-ninjas.com/v1/imagetotext', {
+          method: 'POST',
+          headers: { 'X-Api-Key': process.env.API_NINJAS_KEY },
+          body: form
+        });
 
-    // ====== File input → preprocess → OCR → parse
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files?.[0];
-      if (!file) return;
-      const url = URL.createObjectURL(file);
-      preview.src = url;
-      try {
-        ocrProgress.style.display=''; ocrProgress.value=0; ocrStatus.textContent='Uploading to OCR…';
-        const toSend = preprocessToggle.checked ? (await preprocessToPNGBlob(file)) : file;
-        const text = await ocrWithApiNinjas(toSend);
-        ocrProgress.style.display='none'; ocrStatus.textContent='';
-        const { vendor, dateISO, amount, tax } = parseFields(text);
-        if (vendor) vendorInput.value = vendor;
-        if (dateISO) dateInput.value = dateISO;
-        if (amount!=null) amountInput.value = amount;
-        if (tax!=null)   taxInput.value = tax;
-        updateSaveButton();
-      } catch (e) {
-        console.error(e);
-        ocrProgress.style.display='none';
-        const msg = String(e.message||e);
-        let friendly = msg;
-        if (/No API key/i.test(msg)) friendly = 'Add your API Ninjas key above and click Save Key.';
-        else if (/Unauthorized/i.test(msg)) friendly = 'API key rejected (401). Check the key and try again.';
-        else if (/Image too large/i.test(msg)) friendly = 'Image too large for your plan. Try a smaller image.';
-        ocrStatus.textContent = friendly;
-        ocrStatus.className = 'hint bad';
-        alert('OCR failed: ' + friendly);
-      } finally { URL.revokeObjectURL(url); }
+        const text = await upstream.text();
+        res
+          .status(upstream.status)
+          .type(upstream.headers.get('content-type') || 'application/json')
+          .send(text);
+      } catch (err) {
+        console.error('Proxy error:', err);
+        res.status(500).send('Proxy failure: ' + (err?.message || String(err)));
+      }
     });
 
-    // ====== Linking/Storage: Picker → OPFS → Auto-download
-    let _xlsxWriteLock = Promise.resolve();
-    function _queueWrite(task) { const run = _xlsxWriteLock.then(task, task); _xlsxWriteLock = run.catch(() => {}); return run; }
-    function fsSupported(){ return 'showSaveFilePicker' in window; }
-    function opfsSupported(){ return !!(navigator.storage && navigator.storage.getDirectory); }
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`Image Accountant v2 listening on :${PORT}`));
+""")
 
-    async function ensureOPFSFile(){
-      const year = new Date().getFullYear();
-      const root = await navigator.storage.getDirectory();
-      const appDir = await root.getDirectoryHandle('image-accountant', { create: true });
-      opfsFileHandle = await appDir.getFileHandle(`entries-${year}.xlsx`, { create: true });
-      useOPFS = true; localStorage.setItem('ia_use_opfs', 'true');
+package_json = {
+    "name": "image-accountant-v2",
+    "private": True,
+    "type": "module",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.19.2",
+        "multer": "^1.4.5-lts.1"
     }
-    async function writeOPFS(blob){ if (!opfsFileHandle) await ensureOPFSFile(); const ws = await opfsFileHandle.createWritable(); try { await ws.truncate(0); await ws.write(blob); } finally { await ws.close(); } }
-    function setLinkStatus(){
-      if (fileHandle) { linkStatus.textContent = 'Linked ✔ (picker)'; linkStatus.className = 'hint ok'; connectFileBtn.style.display = ''; return; }
-      if (useOPFS && opfsSupported()) { linkStatus.textContent = 'Linked ✔ (browser storage)'; linkStatus.className = 'hint ok'; connectFileBtn.style.display = ''; return; }
-      if (!fsSupported() && !opfsSupported()) { linkStatus.textContent = 'No linking available (will auto-download on save)'; linkStatus.className = 'hint warn'; connectFileBtn.style.display = 'none'; }
-      else { linkStatus.textContent = 'No linked file'; linkStatus.className = 'hint'; connectFileBtn.style.display = ''; }
-    }
-    async function connectLocalFile(){
-      connectFileBtn.disabled = true;
-      try{
-        if (fsSupported()) {
-          try {
-            fileHandle = await window.showSaveFilePicker({ suggestedName:'image-accountant-entries.xlsx', types:[{description:'Excel', accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}] });
-            useOPFS = false; localStorage.setItem('ia_use_opfs','false'); alert('Linked a local Excel with the system picker.');
-          } catch (err) {
-            const name = err && (err.name || '');
-            const blocked = name === 'SecurityError' || name === 'NotAllowedError';
-            if (blocked && opfsSupported()) { await ensureOPFSFile(); alert('System picker blocked. Using browser storage (OPFS) instead.'); }
-            else if (name === 'AbortError') { /* user cancelled */ }
-            else { console.error(err); alert('Could not link file: ' + (err.message || err)); }
-          }
-        } else if (opfsSupported()) { await ensureOPFSFile(); alert('Using browser storage (OPFS).'); }
-        else { alert('Linking not supported in this browser. We will auto-download on each save.'); }
-      } finally { connectFileBtn.disabled = false; setLinkStatus(); await updateLinkedFile(); }
-    }
-    connectFileBtn.addEventListener('click', connectLocalFile);
+}
 
-    function buildXlsxBlob(){
-      const wsData = [['Date','Vendor','Category','Amount','Tax'], ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const ab = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-      return new Blob([ab], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    }
+env_example = "API_NINJAS_KEY=replace_with_your_real_key\nPORT=3000\n"
 
-    async function updateLinkedFile(){
-      return _queueWrite(async () => {
-        const blob = buildXlsxBlob();
-        try {
-          if (fileHandle) { const w = await fileHandle.createWritable(); try { await w.truncate(0); await w.write(blob); } finally { await w.close(); } return; }
-          if (useOPFS && opfsSupported()) { await writeOPFS(blob); return; }
-        } catch (err) { console.error('Writing linked file failed:', err); }
-        saveAs(blob, 'image-accountant-entries.xlsx');
-      });
-    }
+readme_md = textwrap.dedent("""\
+    # Image Accountant v2 (Better OCR Quality)
 
-    // ====== Save & Export (Excel + PDF)
-    saveBtn.addEventListener('click', async () => {
-      const entry = {
-        vendor:(vendorInput.value||'').trim(),
-        date: dateInput.value||'',
-        amount: amountInput.value ? Number(amountInput.value) : null,
-        tax: taxInput.value ? Number(taxInput.value) : null,
-        category: categoryInput.value||'General'
-      };
-      entries.push(entry);
-      saveEntries();
-      renderEntries();
-      vendorInput.value=''; dateInput.value=''; amountInput.value='';
-      taxInput.value=''; categoryInput.value='General'; fileInput.value=''; preview.src='';
-      updateSaveButton();
-      try{ await updateLinkedFile(); }catch(e){ console.error(e); alert('Could not update linked file.'); }
-    });
+    Improvements:
+    - Deep OCR multipass (angles 0/90/270 × raw/gray/thresh) + heuristic best pick
+    - AU-aware parsing (ABN, GST, invoice #, payment method)
+    - Raw OCR debug panel + Copy button
+    - Secure Node proxy keeps API key server-side
 
-    exportBtn.addEventListener('click', () => {
-      if (!entries.length){ alert('No entries to export.'); return; }
-      const blob = buildXlsxBlob();
-      saveAs(blob, 'image-accountant-entries.xlsx');
-    });
+    ## Quick Start
+    ```bash
+    npm install
+    cp .env.example .env
+    # set API_NINJAS_KEY=... in .env
+    npm run dev
+    # open http://localhost:3000
+    ```
+""")
 
-    exportPdfBtn.addEventListener('click', () => {
-      if (!entries.length){ alert('No entries to export.'); return; }
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      const title = 'Image Accountant — Receipts Summary';
-      doc.setFont('helvetica','bold'); doc.setFontSize(14);
-      doc.text(title, 40, 40);
-      const body = entries.map(e => [ e.date || '', e.vendor || '', e.category || '', (e.amount!=null ? Number(e.amount).toFixed(2) : ''), (e.tax!=null ? Number(e.tax).toFixed(2) : '') ]);
-      const totalAmount = entries.reduce((s,e)=> s + (Number(e.amount)||0), 0);
-      const totalTax    = entries.reduce((s,e)=> s + (Number(e.tax)||0), 0);
-      doc.autoTable({ startY: 60, head: [['Date','Vendor','Category','Total','Tax']], body, styles: { fontSize: 9, cellPadding: 6 }, headStyles: { fillColor: [238,242,247], textColor: 20 }, columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' } }, didDrawPage: () => { doc.setFont('helvetica','normal'); doc.setFontSize(8); const page = doc.internal.getNumberOfPages(); doc.text(`Page ${page}`, doc.internal.pageSize.getWidth()-60, doc.internal.pageSize.getHeight()-20); } });
-      const y = doc.lastAutoTable.finalY + 20;
-      doc.setFont('helvetica','bold'); doc.setFontSize(11);
-      doc.text(`Total (Amount): ${totalAmount.toFixed(2)}`, 40, y);
-      doc.text(`Total (Tax): ${totalTax.toFixed(2)}`, 40, y + 16);
-      doc.save('image-accountant-entries.pdf');
-    });
+index_html = textwrap.dedent("""\
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8"/>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Image Accountant</title>
+      <style>
+        :root { --bg:#f8f9fa; --fg:#212529; --muted:#6c757d; --border:#dee2e6; --card:#fff; --brand:#007bff;}
+        *{box-sizing:border-box}
+        body{margin:0;padding:1rem;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+        .container{max-width:1080px;margin:0 auto;background:var(--card);padding:1rem 1.25rem;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+        h1{margin:.25rem 0 1rem;text-align:center}
+        .row{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}
+        .hint{color:var(--muted);font-size:.9rem}
+        .grid{display:grid;grid-template-columns:140px 1fr;gap:.5rem .75rem;margin-top:.75rem}
+        label{align-self:center;text-align:right;color:#444}
+        input,select,textarea{padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px}
+        button{appearance:none;border:0;padding:.55rem .9rem;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
+        button.secondary{background:#495057}
+        button.ghost{background:#e9ecef;color:#111}
+        button:disabled{background:var(--muted);cursor:not-allowed}
+        table{width:100%;border-collapse:collapse;margin-top:1rem}
+        th,td{padding:.6rem .5rem;border:1px solid var(--border);text-align:left}
+        th{background:#eef2f7}
+        .ok{color:#2f8f46;font-weight:600}.warn{color:#b35b00;font-weight:600}.bad{color:#b00020;font-weight:600}
+        .preview{max-height:260px;max-width:100%;object-fit:contain;border:1px dashed var(--border);border-radius:10px;padding:6px;background:#fff}
+        progress{width:220px;height:10px;border-radius:6px}
+        .col{display:flex;flex-direction:column;gap:.35rem}
+        .switch { display:inline-flex; align-items:center; gap:8px; }
+        .split { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+        textarea#rawOcr{width:100%;min-height:120px;font-family:ui-monospace,Consolas,monospace}
+        .pill{display:inline-block;padding:.15rem .45rem;border-radius:999px;background:#eef2f7;border:1px solid var(--border);font-size:.8rem}
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>Image Accountant</h1>
 
-    // ====== Init
-    function attachKeyHandlers(){
-      saveKeyBtn?.addEventListener('click', () => {
-        const v = apiKeyInput.value.trim();
-        if (!v || v === '********') { alert('Please paste your API key first.'); return; }
-        setApiKey(v); refreshKeyUI(); alert('API key saved in your browser.');
-      });
-    }
+        <div class="row" style="gap:1rem">
+          <input type="file" id="fileInput" accept="image/*"/>
+          <img id="preview" class="preview" alt=""/>
+          <div class="col">
+            <progress id="ocrProgress" max="1" value="0" style="display:none"></progress>
+            <span id="ocrStatus" class="hint"></span>
+            <div class="switch">
+              <input type="checkbox" id="deepToggle" checked>
+              <label for="deepToggle" class="hint">Deep OCR (multi-rotate + multipass)</label>
+            </div>
+            <span class="pill" id="passesBadge">0 passes</span>
+          </div>
+        </div>
 
-    async function init(){
-      refreshKeyUI(); attachKeyHandlers();
-      loadEntries(); updateSaveButton();
-      if (useOPFS && opfsSupported()) { try { await ensureOPFSFile(); } catch(e){ console.warn('OPFS init failed', e); } }
-      setLinkStatus();
-    }
-    init();
-  </script>
-</body>
-</html>
+        <div class="split" style="margin:.6rem 0 0.4rem">
+          <button id="saveBtn" disabled>Save Entry</button>
+          <button id="exportBtn" class="secondary">Export to Excel</button>
+          <button id="exportPdfBtn" class="secondary">Export to PDF</button>
+          <button id="copyRawBtn" class="ghost">Copy Raw OCR</button>
+          <span class="hint">Tip: Deep OCR tries angles 0/90/270 and 3 preprocess variants; toggle off to save API calls.</span>
+        </div>
+
+        <div class="grid">
+          <label for="vendorInput">Vendor</label>
+          <input id="vendorInput" type="text" placeholder="e.g., Officeworks"/>
+
+          <label for="dateInput">Date</label>
+          <input id="dateInput" type="date"/>
+
+          <label for="amountInput">Total</label>
+          <input id="amountInput" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/>
+
+          <label for="taxInput">Tax</label>
+          <input id="taxInput" type="number" step="0.01" inputmode="decimal" placeholder="auto (10%) if empty"/>
+
+          <label for="categoryInput">Category</label>
+          <select id="categoryInput">
+            <option>General</option><option>Travel</option><option>Meals</option>
+            <option>Supplies</option><option>Fuel</option><option>Maintenance</option>
+          </select>
+
+          <label for="invoiceInput">Invoice #</label>
+          <input id="invoiceInput" type="text" placeholder="auto-detected if present"/>
+
+          <label for="abnInput">ABN</label>
+          <input id="abnInput" type="text" placeholder="auto-detected for AU receipts"/>
+
+          <label for="methodInput">Payment</label>
+          <input id="methodInput" type="text" placeholder="Card / Cash / EFTPOS / ..."/>
+        </div>
+
+        <details style="margin-top:.75rem">
+          <summary class="hint">Show raw OCR text (debug)</summary>
+          <textarea id="rawOcr" spellcheck="false"></textarea>
+        </details>
+
+        <table id="entriesTable">
+          <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Total</th><th>Tax</th><th>Invoice #</th><th>ABN</th><th>Payment</th></tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <p class="hint" style="margin-top:.75rem">
+          OCR via secure proxy → API Ninjas. Enhanced multipass preprocessing, rotation search, and AU-aware parsing (ABN, GST). Totals and tax are inferred when missing.
+        </p>
+      </div>
+
+      <!-- libs -->
+      <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
+      <script>
+        const API_URL = '/ocr'; // proxy endpoint (key stays server-side)
+
+        // ===== DOM
+        const fileInput = document.getElementById('fileInput');
+        const preview   = document.getElementById('preview');
+        const ocrStatus = document.getElementById('ocrStatus');
+        const ocrProgress = document.getElementById('ocrProgress');
+        const deepToggle = document.getElementById('deepToggle');
+        const passesBadge = document.getElementById('passesBadge');
+
+        const vendorInput = document.getElementById('vendorInput');
+        const dateInput = document.getElementById('dateInput');
+        const amountInput = document.getElementById('amountInput');
+        const taxInput = document.getElementById('taxInput');
+        const categoryInput = document.getElementById('categoryInput');
+        const invoiceInput = document.getElementById('invoiceInput');
+        const abnInput = document.getElementById('abnInput');
+        const methodInput = document.getElementById('methodInput');
+
+        const saveBtn = document.getElementById('saveBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const exportPdfBtn = document.getElementById('exportPdfBtn');
+        const copyRawBtn = document.getElementById('copyRawBtn');
+        const rawOcr = document.getElementById('rawOcr');
+        const tbody = document.querySelector('#entriesTable tbody');
+
+        let entries = [];
+
+        function updateSaveButton(){
+          saveBtn.disabled = !(vendorInput.value && dateInput.value && amountInput.value);
+        }
+        [vendorInput,dateInput,amountInput].forEach(e=>e.addEventListener('input',updateSaveButton));
+
+        function renderEntries(){
+          tbody.innerHTML = '';
+          entries.forEach(e=>{
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${e.date||''}</td><td>${e.vendor||''}</td><td>${e.category||''}</td><td>${fmt(e.amount)}</td><td>${fmt(e.tax)}</td><td>${e.invoice||''}</td><td>${e.abn||''}</td><td>${e.method||''}</td>`;
+            tbody.appendChild(tr);
+          });
+        }
+        function fmt(v){ return v==null||v===''? '' : Number(v).toFixed(2); }
+
+        // ===== Preprocess helpers
+        async function drawOnCanvas(img, rotateDeg=0, variant='raw'){
+          const w = img.naturalWidth, h = img.naturalHeight;
+          const MAX = 2200;
+          const scale = Math.min(MAX/Math.max(w,h), 3);
+          const sw = Math.round(w*Math.max(1,scale)), sh = Math.round(h*Math.max(1,scale));
+          const rot = (rotateDeg%360+360)%360;
+          const cw = (rot===90||rot===270)? sh : sw;
+          const ch = (rot===90||rot===270)? sw : sh;
+          const c = document.createElement('canvas'); c.width=cw; c.height=ch;
+          const g = c.getContext('2d', { willReadFrequently:true });
+          g.imageSmoothingEnabled = true; g.imageSmoothingQuality='high';
+          g.save();
+          if(rot){ g.translate(cw/2, ch/2); g.rotate(rot*Math.PI/180); g.drawImage(img, -sw/2, -sh/2, sw, sh); }
+          else { g.drawImage(img, 0, 0, sw, sh); }
+          g.restore();
+
+          if(variant==='raw') return await new Promise(r=>c.toBlob(r,'image/png',0.92));
+
+          // grayscale
+          const id = g.getImageData(0,0,cw,ch); const d=id.data;
+          let min=255,max=0;
+          for(let i=0;i<d.length;i+=4){ const gray=d[i]*.299+d[i+1]*.587+d[i+2]*.114; if(gray<min)min=gray; if(gray>max)max=gray; }
+          const spread=Math.max(1,max-min);
+          for(let i=0;i<d.length;i+=4){ let gray=d[i]*.299+d[i+1]*.587+d[i+2]*.114; gray=(gray-min)*(255/spread); const v=gray|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
+          g.putImageData(id,0,0);
+
+          if(variant==='gray') return await new Promise(r=>c.toBlob(r,'image/png',0.92));
+
+          // adaptive threshold (simple box mean)
+          const src=g.getImageData(0,0,cw,ch), sd=src.data;
+          const out=g.createImageData(cw,ch), od=out.data;
+          const box=15, half=box>>1, W=cw, H=ch; const S=new Uint32Array((W+1)*(H+1));
+          for(let y=1;y<=H;y++){ let rowsum=0, idx=y*(W+1); for(let x=1;x<=W;x++){ const p=((y-1)*W+(x-1))<<2; rowsum+=sd[p]; S[idx+x]=S[(y-1)*(W+1)+x]+rowsum; }}
+          for(let y=0;y<H;y++){ const y0=Math.max(0,y-half), y1=Math.min(H-1,y+half); for(let x=0;x<W;x++){ const x0=Math.max(0,x-half), x1=Math.min(W-1,x+half); const count=(x1-x0+1)*(y1-y0+1); const sum=S[(y1+1)*(W+1)+(x1+1)] + S[y0*(W+1)+x0] - S[y0*(W+1)+(x1+1)] - S[(y1+1)*(W+1)+x0]; const mean=sum/count; const pix=sd[((y*W)+x)<<2]; const v=pix<mean*0.93?0:255; const q=((y*W)+x)<<2; od[q]=od[q+1]=od[q+2]=v; od[q+3]=255; }}
+          g.putImageData(out,0,0);
+          return await new Promise(r=>c.toBlob(r,'image/png',0.92));
+        }
+
+        async function buildPassBlobs(file, deep){
+          const imgURL = URL.createObjectURL(file);
+          try{
+            const img = await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=imgURL; });
+            const angles = deep? [0,90,270] : [0];
+            const variants = deep? ['raw','gray','thresh'] : ['gray'];
+            const blobs=[];
+            for(const a of angles){ for(const v of variants){ blobs.push(await drawOnCanvas(img,a,v)); } }
+            return blobs;
+          } finally { URL.revokeObjectURL(imgURL); }
+        }
+
+        // ===== OCR
+        async function ocrBlob(blob){
+          const form = new FormData(); form.append('image', blob, 'input.png');
+          const res = await fetch(API_URL, { method:'POST', body:form });
+          if(!res.ok){ const txt=await res.text().catch(()=> ''); throw new Error(`OCR ${res.status}: ${txt||'fail'}`); }
+          const data = await res.json().catch(()=> null);
+          return Array.isArray(data)? data.map(o=>o.text||'').join('\\n'): (typeof data==='string'? data:'');\n        }\n\n        function qualityScore(text){\n          if(!text) return 0;\n          const lines = text.split(/\\r?\\n/).filter(Boolean);\n          const digits = (text.match(/\\d/g)||[]).length;\n          const moneyHits = (text.match(/\\$\\s?\\d|\\b\\d{1,3}(?:,\\d{3})*\\.\\d{2}\\b/g)||[]).length;\n          const totalHits = (text.match(/\\btotal\\b/i)||[]).length;\n          const dateHits = (text.match(/\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b|\\b\\d{4}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{1,2}\\b/i)||[]).length;\n          return lines.length*0.5 + digits*0.02 + moneyHits*2 + totalHits*2.5 + dateHits*2;\n        }\n\n        function parseFieldsAU(fullText){\n          const text = (fullText||'').replace(/[^\\S\\r\\n]+/g,' ').trim();\n          rawOcr.value = text;\n          const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);\n\n          let vendor='';\n          for(const l of lines.slice(0,12)){\n            if(/^invoice\\b/i.test(l)) continue;\n            if(/[A-Za-z]/.test(l) && !/^[$€£]?\\d/.test(l)) { vendor = l.replace(/\\s{2,}.*/, ''); break; }\n          }\n\n          const abnMatch = text.match(/\\bABN[:\\s]*([0-9]{2}\\s?[0-9]{3}\\s?[0-9]{3}\\s?[0-9]{3})\\b/i);\n          const abn = abnMatch? abnMatch[1].replace(/\\s+/g,'') : '';\n\n          const invMatch = text.match(/\\b(invoice\\s*(no\\.|#|number)?[:\\s]+)([A-Z0-9\\-\\/]+)\\b/i);\n          const invoice = invMatch? (invMatch[3]||'').trim() : '';\n\n          const d1 = text.match(/\\b(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{2,4})\\b/);\n          const d2 = text.match(/\\b(\\d{4})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{1,2})\\b/);\n          let dateISO='';\n          if(d1){ let [_, d, m, y] = d1; if(y.length===2) y = '20'+y; const dd=String(d).padStart(2,'0'); const mm=String(m).padStart(2,'0'); dateISO=`${y}-${mm}-${dd}`; }\n          else if(d2){ const [_, y, m, d] = d2; dateISO=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }\n\n          const moneyRx = /(?:[$£€]\\s*)?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})/g;\n          let total=null, gst=null, subtotal=null;\n          for(const l of lines.slice().reverse()){\n            if(/\\btotal\\b/i.test(l) && !/sub\\s*total/i.test(l)){\n              const ms=l.match(moneyRx); if(ms?.length) { total=parseFloat(ms.pop().replace(/[^\\d.]/g,'')); break; }\n            }\n          }\n          for(const l of lines){ if(/\\b(GST|VAT|MWST|Tax)\\b/i.test(l)){ const ms=l.match(moneyRx); if(ms?.length) { gst=parseFloat(ms.pop().replace(/[^\\d.]/g,'')); break; } } }\n          for(const l of lines){ if(/sub\\s*total/i.test(l)){ const ms=l.match(moneyRx); if(ms?.length) { subtotal=parseFloat(ms.pop().replace(/[^\\d.]/g,'')); break; } } }\n\n          if(total==null){ const nums=[]; for(const l of lines){ const ms=l.match(moneyRx); if(ms) nums.push(...ms.map(s=>parseFloat(s.replace(/[^\\d.]/g,'')))); } nums.sort((a,b)=>a-b); if(nums.length) total=nums.at(-1); }\n          if(gst==null && total!=null && /\\bGST\\b/i.test(text)) gst = Number((total*0.10).toFixed(2));\n          if(subtotal==null && total!=null && gst!=null) subtotal = Number((total - gst).toFixed(2));\n\n          let method='';\n          if(/EFTPOS/i.test(text)) method='EFTPOS';\n          else if(/Cash/i.test(text)) method='Cash';\n          else if(/Visa|Mastercard|MC|Amex|American Express/i.test(text)) method='Card';\n\n          const vendLower = vendor.toLowerCase();\n          let category='General';\n          if(/bp|caltex|ampol|7-?eleven|shell|mobil/.test(vendLower)) category='Fuel';\n          else if(/officeworks|stationery|harvey|jb hi.?fi|good guys/.test(vendLower)) category='Supplies';\n          else if(/uber eats|mcdonald|kfc|restaurant|cafe|grill|domino/i.test(vendLower)) category='Meals';\n\n          return { vendor, abn, invoice, dateISO, total, gst, subtotal, method, category, raw:text };\n        }\n\n        async function runOCR(file){\n          const deep = !!deepToggle.checked;\n          const blobs = await buildPassBlobs(file, deep);\n          passesBadge.textContent = `${blobs.length} passes`;\n          const results = [];\n          let done = 0;\n          for(const b of blobs){\n            try{ const t = await ocrBlob(b); results.push({t, score:qualityScore(t)}); }\n            catch(e){ /* ignore individual pass errors */ }\n            finally{ done++; ocrStatus.textContent = `OCR ${done}/${blobs.length}…`; }\n          }\n          const best = results.sort((a,b)=>b.score-a.score)[0] || { t:'' };\n          return best.t;\n        }\n\n        fileInput.addEventListener('change', async ()=>{\n          const file = fileInput.files?.[0]; if(!file) return;\n          const url = URL.createObjectURL(file); preview.src = url;\n          try{\n            ocrProgress.style.display=''; ocrStatus.textContent='Starting OCR…';\n            const text = await runOCR(file);\n            ocrProgress.style.display='none'; ocrStatus.textContent='';\n\n            const { vendor, abn, invoice, dateISO, total, gst, subtotal, method, category, raw } = parseFieldsAU(text);\n            vendorInput.value = vendor || vendorInput.value;\n            abnInput.value = abn || abnInput.value;\n            invoiceInput.value = invoice || invoiceInput.value;\n            if(dateISO) dateInput.value = dateISO;\n            if(total!=null) amountInput.value = total;\n            if(gst!=null) taxInput.value = gst; else if(total!=null && /\\bGST\\b/i.test(raw)) taxInput.value = (total*0.10).toFixed(2);\n            methodInput.value = method || methodInput.value;\n            categoryInput.value = category;\n            updateSaveButton();\n          }catch(e){\n            console.error(e); ocrProgress.style.display='none';\n            ocrStatus.textContent = 'OCR failed: '+ (e.message||e);\n            ocrStatus.className = 'hint bad';\n            alert('OCR failed: '+(e.message||e));\n          } finally { URL.revokeObjectURL(url); }\n        });\n\n        copyRawBtn.addEventListener('click', async ()=>{\n          try{ await navigator.clipboard.writeText(rawOcr.value||''); copyRawBtn.textContent='Copied!'; setTimeout(()=>copyRawBtn.textContent='Copy Raw OCR',1200); }catch{ alert('Clipboard blocked'); }\n        });\n\n        // ===== Save & Export\n        document.getElementById('saveBtn').addEventListener('click',()=>{\n          const e = {\n            vendor: vendorInput.value,\n            date: dateInput.value,\n            amount: amountInput.value ? Number(amountInput.value) : null,\n            tax: taxInput.value ? Number(taxInput.value) : null,\n            category: categoryInput.value,\n            invoice: invoiceInput.value,\n            abn: abnInput.value,\n            method: methodInput.value\n          };\n          entries.push(e); renderEntries();\n          vendorInput.value=''; dateInput.value=''; amountInput.value=''; taxInput.value='';\n          categoryInput.value='General'; invoiceInput.value=''; abnInput.value=''; methodInput.value=''; rawOcr.value='';\n          updateSaveButton();\n        });\n\n        function buildXlsx(){\n          const ws = XLSX.utils.json_to_sheet(entries);\n          const wb = XLSX.utils.book_new();\n          XLSX.utils.book_append_sheet(wb, ws, 'Receipts');\n          return XLSX.write(wb, {bookType:'xlsx', type:'array'});\n        }\n\n        exportBtn.addEventListener('click',()=>{\n          if(!entries.length) return alert('No entries to export.');\n          const data = buildXlsx();\n          saveAs(new Blob([data],{type:'application/octet-stream'}),'entries.xlsx');\n        });\n\n        exportPdfBtn.addEventListener('click',()=>{\n          if (!entries.length) return alert('No entries to export.');\n          const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit:'pt', format:'a4' });\n          doc.setFont('helvetica','bold'); doc.setFontSize(14);\n          doc.text('Receipts Summary', 40, 40);\n          const body = entries.map(e=>[ e.date||'', e.vendor||'', e.category||'', fmt(e.amount), fmt(e.tax), e.invoice||'', e.abn||'', e.method||'' ]);\n          doc.autoTable({ startY:60, head:[['Date','Vendor','Category','Total','Tax','Invoice #','ABN','Payment']], body, styles:{fontSize:9,cellPadding:6}, headStyles:{ fillColor:[238,242,247], textColor:20 }, columnStyles:{ 3:{ halign:'right' }, 4:{ halign:'right' } } });\n          doc.save('entries.pdf');\n        });\n      </script>\n    </body>\n    </html>\n""")
+
+with open(os.path.join(root, "server.js"), "w", encoding="utf-8") as f:
+    f.write(server_js)
+
+with open(os.path.join(root, "package.json"), "w", encoding="utf-8") as f:
+    json.dump(package_json, f, indent=2)
+
+with open(os.path.join(root, ".env.example"), "w", encoding="utf-8") as f:
+    f.write(env_example)
+
+with open(os.path.join(root, "README.md"), "w", encoding="utf-8") as f:
+    f.write(readme_md)
+
+with open(os.path.join(public_dir, "index.html"), "w", encoding="utf-8") as f:
+    f.write(index_html)
+
+zip_path = "/mnt/data/image-accountant-proxy-v2.zip"
+shutil.make_archive(zip_path.replace(".zip",""), 'zip', root)
+
+zip_path
