@@ -35,6 +35,18 @@
   <div class="container">
     <h1>Image Accountant</h1>
 
+    <!-- API key save/load UI (stored locally, never hardcoded) -->
+    <div class="row actions" style="justify-content:space-between; align-items:center">
+      <div class="col" style="flex:1; min-width:260px">
+        <label for="apiKeyInput" class="hint">API Ninjas Key (stored locally in this browser)</label>
+        <input id="apiKeyInput" type="password" placeholder="Paste your API key"/>
+      </div>
+      <div class="col" style="align-items:flex-start">
+        <button id="saveKeyBtn" class="ghost">Save Key</button>
+        <span id="keyStatus" class="hint"></span>
+      </div>
+    </div>
+
     <div class="row actions">
       <input type="file" id="fileInput" accept="image/*"/>
       <img id="preview" class="preview" alt=""/>
@@ -82,8 +94,8 @@
     </table>
 
     <p class="hint" style="margin-top:.75rem">
-      OCR: API Ninjas Image-to-Text. Replace <strong>700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel</strong> below.  
-      If your Remote Desktop blocks the file picker, we auto-store a rolling Excel in the browser (OPFS), and PDF export is always available.
+      OCR via API Ninjas Image-to-Text. Paste your key above and click <strong>Save Key</strong>.
+      For locked-down environments, we store a rolling Excel in the browser (OPFS) and PDF export is always available.
     </p>
   </div>
 
@@ -96,29 +108,35 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 
   <script>
-    // ====== CONFIG ======
-    const API_NINJAS_KEY = '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel'; // <-- put your API Ninjas key here
+    // ====== CONFIG (no hardcoded secret) ======
     const API_URL = 'https://api.api-ninjas.com/v1/imagetotext';
 
+    function getApiKey(){ return (localStorage.getItem('ia_api_key') || '').trim(); }
+    function setApiKey(k){ localStorage.setItem('ia_api_key', (k||'').trim()); }
+
     // ====== DOM
-    const fileInput       = document.getElementById('fileInput');
-    const preview         = document.getElementById('preview');
-    const ocrProgress     = document.getElementById('ocrProgress');
-    const ocrStatus       = document.getElementById('ocrStatus');
-    const preprocessToggle= document.getElementById('preprocessToggle');
+    const fileInput        = document.getElementById('fileInput');
+    const preview          = document.getElementById('preview');
+    const ocrProgress      = document.getElementById('ocrProgress');
+    const ocrStatus        = document.getElementById('ocrStatus');
+    const preprocessToggle = document.getElementById('preprocessToggle');
 
-    const vendorInput     = document.getElementById('vendorInput');
-    const dateInput       = document.getElementById('dateInput');
-    const amountInput     = document.getElementById('amountInput');
-    const taxInput        = document.getElementById('taxInput');
-    const categoryInput   = document.getElementById('categoryInput');
+    const apiKeyInput      = document.getElementById('apiKeyInput');
+    const saveKeyBtn       = document.getElementById('saveKeyBtn');
+    const keyStatus        = document.getElementById('keyStatus');
 
-    const saveBtn         = document.getElementById('saveBtn');
-    const exportBtn       = document.getElementById('exportBtn');
-    const exportPdfBtn    = document.getElementById('exportPdfBtn');
-    const connectFileBtn  = document.getElementById('connectFileBtn');
-    const linkStatus      = document.getElementById('linkStatus');
-    const tbody           = document.querySelector('#entriesTable tbody');
+    const vendorInput      = document.getElementById('vendorInput');
+    const dateInput        = document.getElementById('dateInput');
+    const amountInput      = document.getElementById('amountInput');
+    const taxInput         = document.getElementById('taxInput');
+    const categoryInput    = document.getElementById('categoryInput');
+
+    const saveBtn          = document.getElementById('saveBtn');
+    const exportBtn        = document.getElementById('exportBtn');
+    const exportPdfBtn     = document.getElementById('exportPdfBtn');
+    const connectFileBtn   = document.getElementById('connectFileBtn');
+    const linkStatus       = document.getElementById('linkStatus');
+    const tbody            = document.querySelector('#entriesTable tbody');
 
     // ====== Data
     let entries = [];
@@ -129,64 +147,58 @@
     let useOPFS = JSON.parse(localStorage.getItem('ia_use_opfs') || 'false');
 
     // ====== UI helpers
-    function updateSaveButton() {
+    function refreshKeyUI(){
+      const hasKey = !!getApiKey();
+      keyStatus.textContent = hasKey ? 'Key saved ✔' : 'No key saved';
+      keyStatus.className = 'hint ' + (hasKey ? 'ok' : 'warn');
+      if (hasKey) apiKeyInput.value = '********';
+    }
+
+    function updateSaveButton(){
       saveBtn.disabled = !(vendorInput.value.trim() && dateInput.value && amountInput.value);
     }
     [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
 
-    function loadEntries() {
+    function loadEntries(){
       const raw = localStorage.getItem('image_accountant_entries');
       if (raw) { try { entries = JSON.parse(raw) || []; } catch { entries = []; } }
       renderEntries();
     }
-    function saveEntries() {
-      localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
-    }
-    function renderEntries() {
+    function saveEntries(){ localStorage.setItem('image_accountant_entries', JSON.stringify(entries)); }
+    function renderEntries(){
       tbody.innerHTML = '';
       for (const e of entries) {
         const tr = document.createElement('tr');
-        tr.innerHTML =
-          `<td>${e.date || ''}</td>
-           <td>${e.vendor || ''}</td>
-           <td>${e.category || ''}</td>
-           <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
-           <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
+        tr.innerHTML = `
+          <td>${e.date || ''}</td>
+          <td>${e.vendor || ''}</td>
+          <td>${e.category || ''}</td>
+          <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
+          <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
         tbody.appendChild(tr);
       }
     }
 
     // ====== Optional preprocessing (client-side) to improve OCR
-    async function preprocessToPNGBlob(imgFile) {
+    async function preprocessToPNGBlob(imgFile){
       const imgURL = URL.createObjectURL(imgFile);
       try {
-        const img = await new Promise((res, rej) => {
-          const im = new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=imgURL;
-        });
-
+        const img = await new Promise((res, rej) => { const im = new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=imgURL; });
         const MAX_SIDE = 2200;
         const w = img.naturalWidth, h = img.naturalHeight;
         const scale = Math.min(MAX_SIDE / Math.max(w, h), 3);
         const cw = Math.round(w * Math.max(1, scale));
         const ch = Math.round(h * Math.max(1, scale));
-
         const c = document.createElement('canvas'); c.width = cw; c.height = ch;
         const g = c.getContext('2d', { willReadFrequently: true });
         g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
         g.drawImage(img, 0, 0, cw, ch);
-
-        // grayscale + contrast stretch
         const imgData = g.getImageData(0,0,cw,ch), d = imgData.data;
         let min=255, max=0;
         for (let i=0;i<d.length;i+=4){ const gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; if(gray<min)min=gray; if(gray>max)max=gray; }
         const spread=Math.max(1,max-min);
-        for (let i=0;i<d.length;i+=4){
-          let gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
-          gray=(gray-min)*(255/spread); const v=gray|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
-        }
+        for (let i=0;i<d.length;i+=4){ let gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; gray=(gray-min)*(255/spread); const v=gray|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
         g.putImageData(imgData,0,0);
-
-        // simple adaptive threshold
         const src=g.getImageData(0,0,cw,ch), sd=src.data;
         const out=g.createImageData(cw,ch), od=out.data;
         const box=15, half=box>>1, W=cw, H=ch;
@@ -208,35 +220,25 @@
           }
         }
         g.putImageData(out,0,0);
-
         const blob = await new Promise(r => c.toBlob(r, 'image/png', 0.92));
         return blob;
-      } finally {
-        URL.revokeObjectURL(imgURL);
-      }
+      } finally { URL.revokeObjectURL(imgURL); }
     }
 
-    // ====== OCR via API Ninjas
-    async function ocrWithApiNinjas(fileOrBlob) {
-      if (!API_NINJAS_KEY || API_NINJAS_KEY === '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel') {
-        throw new Error('Missing API key. Open index.html and set API_NINJAS_KEY.');
-      }
+    // ====== OCR via API Ninjas (reads key from localStorage)
+    async function ocrWithApiNinjas(fileOrBlob){
+      const key = getApiKey();
+      if (!key) throw new Error('No API key is saved. Paste your key and click "Save Key".');
       const form = new FormData();
-      form.append('image', fileOrBlob, 'input.png'); // field name must be "image"
-
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'X-Api-Key': API_NINJAS_KEY },
-        body: form
-      });
-
+      form.append('image', fileOrBlob, 'input.png');
+      const res = await fetch(API_URL, { method: 'POST', headers: { 'X-Api-Key': key }, body: form });
       if (!res.ok) {
-        if (res.status === 401) throw new Error('Unauthorized (check API key).');
-        if (res.status === 413) throw new Error('Image too large for your plan.');
+        if (res.status === 401) throw new Error('API key rejected (401 Unauthorized). Double-check the key.');
+        if (res.status === 413) throw new Error('Image too large for your plan (413). Try a smaller image.');
         const txt = await res.text().catch(()=> '');
         throw new Error(`OCR error ${res.status}: ${txt || 'request failed'}`);
       }
-      const data = await res.json(); // [{text:"..."}, ...]
+      const data = await res.json();
       const fullText = Array.isArray(data) ? data.map(o => o.text || '').join('\n') : '';
       return fullText;
     }
@@ -245,16 +247,12 @@
     function parseFields(fullText){
       const text = (fullText||'').replace(/[^\S\r\n]+/g,' ').trim();
       const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-
-      // Vendor: first meaningful top line not "Invoice"
       let vendor='';
       for (let i=0;i<Math.min(10,lines.length);i++){
         const l = lines[i];
         if (/^\s*invoice\b/i.test(l)) continue;
-        if (/[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) { vendor = l.replace(/\s{2,}.*/,''); break; }
+        if (/[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) { vendor = l.replace(/\s{2,}.*/, ''); break; }
       }
-
-      // Date
       const dateRegexes = [
         /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/,
         /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
@@ -273,7 +271,6 @@
           { const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
         }
       }
-
       const moneyRx = /(?:[\$£€]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
       let amount=null, tax=null;
       for (let i=lines.length-1;i>=0;i--){
@@ -297,21 +294,17 @@
       return { vendor, dateISO, amount, tax, raw:text };
     }
 
-    // ====== File input → (optional preprocess) → OCR via API → parse
+    // ====== File input → preprocess → OCR → parse
     fileInput.addEventListener('change', async () => {
       const file = fileInput.files?.[0];
       if (!file) return;
-
       const url = URL.createObjectURL(file);
       preview.src = url;
-
       try {
         ocrProgress.style.display=''; ocrProgress.value=0; ocrStatus.textContent='Uploading to OCR…';
         const toSend = preprocessToggle.checked ? (await preprocessToPNGBlob(file)) : file;
-
         const text = await ocrWithApiNinjas(toSend);
         ocrProgress.style.display='none'; ocrStatus.textContent='';
-
         const { vendor, dateISO, amount, tax } = parseFields(text);
         if (vendor) vendorInput.value = vendor;
         if (dateISO) dateInput.value = dateISO;
@@ -323,130 +316,71 @@
         ocrProgress.style.display='none';
         const msg = String(e.message||e);
         let friendly = msg;
-        if (/Missing API key/i.test(msg)) friendly = 'Add your API Ninjas key in the code (API_NINJAS_KEY).';
-        else if (/Unauthorized/i.test(msg)) friendly = 'API key rejected (401). Check your key.';
+        if (/No API key/i.test(msg)) friendly = 'Add your API Ninjas key above and click Save Key.';
+        else if (/Unauthorized/i.test(msg)) friendly = 'API key rejected (401). Check the key and try again.';
         else if (/Image too large/i.test(msg)) friendly = 'Image too large for your plan. Try a smaller image.';
         ocrStatus.textContent = friendly;
         ocrStatus.className = 'hint bad';
         alert('OCR failed: ' + friendly);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
+      } finally { URL.revokeObjectURL(url); }
     });
 
     // ====== Linking/Storage: Picker → OPFS → Auto-download
     let _xlsxWriteLock = Promise.resolve();
-    function _queueWrite(task) {
-      const run = _xlsxWriteLock.then(task, task);
-      _xlsxWriteLock = run.catch(() => {}); // keep chain alive
-      return run;
-    }
+    function _queueWrite(task) { const run = _xlsxWriteLock.then(task, task); _xlsxWriteLock = run.catch(() => {}); return run; }
     function fsSupported(){ return 'showSaveFilePicker' in window; }
     function opfsSupported(){ return !!(navigator.storage && navigator.storage.getDirectory); }
 
-    async function ensureOPFSFile() {
+    async function ensureOPFSFile(){
       const year = new Date().getFullYear();
       const root = await navigator.storage.getDirectory();
       const appDir = await root.getDirectoryHandle('image-accountant', { create: true });
       opfsFileHandle = await appDir.getFileHandle(`entries-${year}.xlsx`, { create: true });
-      useOPFS = true;
-      localStorage.setItem('ia_use_opfs', 'true');
+      useOPFS = true; localStorage.setItem('ia_use_opfs', 'true');
     }
-    async function writeOPFS(blob) {
-      if (!opfsFileHandle) await ensureOPFSFile();
-      const ws = await opfsFileHandle.createWritable();
-      try {
-        await ws.truncate(0);
-        await ws.write(blob);
-      } finally {
-        await ws.close();
-      }
-    }
+    async function writeOPFS(blob){ if (!opfsFileHandle) await ensureOPFSFile(); const ws = await opfsFileHandle.createWritable(); try { await ws.truncate(0); await ws.write(blob); } finally { await ws.close(); } }
     function setLinkStatus(){
-      if (fileHandle) {
-        linkStatus.textContent = 'Linked ✔ (picker)';
-        linkStatus.className = 'hint ok';
-        connectFileBtn.style.display = '';
-        return;
-      }
-      if (useOPFS && opfsSupported()) {
-        linkStatus.textContent = 'Linked ✔ (browser storage)';
-        linkStatus.className = 'hint ok';
-        connectFileBtn.style.display = '';
-        return;
-      }
-      if (!fsSupported() && !opfsSupported()) {
-        linkStatus.textContent = 'No linking available (will auto-download on save)';
-        linkStatus.className = 'hint warn';
-        connectFileBtn.style.display = 'none';
-      } else {
-        linkStatus.textContent = 'No linked file';
-        linkStatus.className = 'hint';
-        connectFileBtn.style.display = '';
-      }
+      if (fileHandle) { linkStatus.textContent = 'Linked ✔ (picker)'; linkStatus.className = 'hint ok'; connectFileBtn.style.display = ''; return; }
+      if (useOPFS && opfsSupported()) { linkStatus.textContent = 'Linked ✔ (browser storage)'; linkStatus.className = 'hint ok'; connectFileBtn.style.display = ''; return; }
+      if (!fsSupported() && !opfsSupported()) { linkStatus.textContent = 'No linking available (will auto-download on save)'; linkStatus.className = 'hint warn'; connectFileBtn.style.display = 'none'; }
+      else { linkStatus.textContent = 'No linked file'; linkStatus.className = 'hint'; connectFileBtn.style.display = ''; }
     }
     async function connectLocalFile(){
       connectFileBtn.disabled = true;
       try{
         if (fsSupported()) {
           try {
-            fileHandle = await window.showSaveFilePicker({
-              suggestedName:'image-accountant-entries.xlsx',
-              types:[{description:'Excel', accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]
-            });
-            useOPFS = false;
-            localStorage.setItem('ia_use_opfs','false');
-            alert('Linked a local Excel with the system picker.');
+            fileHandle = await window.showSaveFilePicker({ suggestedName:'image-accountant-entries.xlsx', types:[{description:'Excel', accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}] });
+            useOPFS = false; localStorage.setItem('ia_use_opfs','false'); alert('Linked a local Excel with the system picker.');
           } catch (err) {
             const name = err && (err.name || '');
             const blocked = name === 'SecurityError' || name === 'NotAllowedError';
-            if (blocked && opfsSupported()) {
-              await ensureOPFSFile();
-              alert('System picker blocked. Using browser storage (OPFS) instead.');
-            } else if (name === 'AbortError') {
-              // user cancelled; do nothing
-            } else {
-              console.error(err);
-              alert('Could not link file: ' + (err.message || err));
-            }
+            if (blocked && opfsSupported()) { await ensureOPFSFile(); alert('System picker blocked. Using browser storage (OPFS) instead.'); }
+            else if (name === 'AbortError') { /* user cancelled */ }
+            else { console.error(err); alert('Could not link file: ' + (err.message || err)); }
           }
-        } else if (opfsSupported()) {
-          await ensureOPFSFile();
-          alert('Using browser storage (OPFS).');
-        } else {
-          alert('Linking not supported in this browser. We will auto-download on each save.');
-        }
-      } finally {
-        connectFileBtn.disabled = false;
-        setLinkStatus();
-        await updateLinkedFile(); // create/update immediately
-      }
+        } else if (opfsSupported()) { await ensureOPFSFile(); alert('Using browser storage (OPFS).'); }
+        else { alert('Linking not supported in this browser. We will auto-download on each save.'); }
+      } finally { connectFileBtn.disabled = false; setLinkStatus(); await updateLinkedFile(); }
     }
     connectFileBtn.addEventListener('click', connectLocalFile);
 
-    function buildXlsxBlob() {
-      const wsData = [['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
+    function buildXlsxBlob(){
+      const wsData = [['Date','Vendor','Category','Amount','Tax'], ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
       const ab = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-      return new Blob([ab], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      });
+      return new Blob([ab], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     }
 
     async function updateLinkedFile(){
       return _queueWrite(async () => {
         const blob = buildXlsxBlob();
         try {
-          if (fileHandle) {
-            const w = await fileHandle.createWritable();
-            try { await w.truncate(0); await w.write(blob); } finally { await w.close(); }
-            return;
-          }
+          if (fileHandle) { const w = await fileHandle.createWritable(); try { await w.truncate(0); await w.write(blob); } finally { await w.close(); } return; }
           if (useOPFS && opfsSupported()) { await writeOPFS(blob); return; }
         } catch (err) { console.error('Writing linked file failed:', err); }
-        saveAs(blob, 'image-accountant-entries.xlsx'); // last resort
+        saveAs(blob, 'image-accountant-entries.xlsx');
       });
     }
 
@@ -462,11 +396,9 @@
       entries.push(entry);
       saveEntries();
       renderEntries();
-
       vendorInput.value=''; dateInput.value=''; amountInput.value='';
       taxInput.value=''; categoryInput.value='General'; fileInput.value=''; preview.src='';
       updateSaveButton();
-
       try{ await updateLinkedFile(); }catch(e){ console.error(e); alert('Could not update linked file.'); }
     });
 
@@ -476,60 +408,37 @@
       saveAs(blob, 'image-accountant-entries.xlsx');
     });
 
-    // NEW: Export to PDF (summary table + totals)
     exportPdfBtn.addEventListener('click', () => {
       if (!entries.length){ alert('No entries to export.'); return; }
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-
       const title = 'Image Accountant — Receipts Summary';
       doc.setFont('helvetica','bold'); doc.setFontSize(14);
       doc.text(title, 40, 40);
-
-      // table data
-      const body = entries.map(e => [
-        e.date || '',
-        e.vendor || '',
-        e.category || '',
-        (e.amount!=null ? Number(e.amount).toFixed(2) : ''),
-        (e.tax!=null ? Number(e.tax).toFixed(2) : '')
-      ]);
+      const body = entries.map(e => [ e.date || '', e.vendor || '', e.category || '', (e.amount!=null ? Number(e.amount).toFixed(2) : ''), (e.tax!=null ? Number(e.tax).toFixed(2) : '') ]);
       const totalAmount = entries.reduce((s,e)=> s + (Number(e.amount)||0), 0);
       const totalTax    = entries.reduce((s,e)=> s + (Number(e.tax)||0), 0);
-
-      doc.autoTable({
-        startY: 60,
-        head: [['Date','Vendor','Category','Total','Tax']],
-        body,
-        styles: { fontSize: 9, cellPadding: 6 },
-        headStyles: { fillColor: [238,242,247], textColor: 20 },
-        columnStyles: {
-          3: { halign: 'right' },
-          4: { halign: 'right' }
-        },
-        didDrawPage: (data) => {
-          doc.setFont('helvetica','normal'); doc.setFontSize(8);
-          const page = doc.internal.getNumberOfPages();
-          doc.text(`Page ${page}`, doc.internal.pageSize.getWidth()-60, doc.internal.pageSize.getHeight()-20);
-        }
-      });
-
-      // Totals footer
+      doc.autoTable({ startY: 60, head: [['Date','Vendor','Category','Total','Tax']], body, styles: { fontSize: 9, cellPadding: 6 }, headStyles: { fillColor: [238,242,247], textColor: 20 }, columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' } }, didDrawPage: () => { doc.setFont('helvetica','normal'); doc.setFontSize(8); const page = doc.internal.getNumberOfPages(); doc.text(`Page ${page}`, doc.internal.pageSize.getWidth()-60, doc.internal.pageSize.getHeight()-20); } });
       const y = doc.lastAutoTable.finalY + 20;
       doc.setFont('helvetica','bold'); doc.setFontSize(11);
       doc.text(`Total (Amount): ${totalAmount.toFixed(2)}`, 40, y);
       doc.text(`Total (Tax): ${totalTax.toFixed(2)}`, 40, y + 16);
-
       doc.save('image-accountant-entries.pdf');
     });
 
     // ====== Init
+    function attachKeyHandlers(){
+      saveKeyBtn?.addEventListener('click', () => {
+        const v = apiKeyInput.value.trim();
+        if (!v || v === '********') { alert('Please paste your API key first.'); return; }
+        setApiKey(v); refreshKeyUI(); alert('API key saved in your browser.');
+      });
+    }
+
     async function init(){
-      loadEntries();
-      updateSaveButton();
-      if (useOPFS && opfsSupported()) {
-        try { await ensureOPFSFile(); } catch(e){ console.warn('OPFS init failed', e); }
-      }
+      refreshKeyUI(); attachKeyHandlers();
+      loadEntries(); updateSaveButton();
+      if (useOPFS && opfsSupported()) { try { await ensureOPFSFile(); } catch(e){ console.warn('OPFS init failed', e); } }
       setLinkStatus();
     }
     init();
