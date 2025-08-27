@@ -97,7 +97,7 @@
 
   <script>
     // ====== CONFIG ======
-    const API_NINJAS_KEY = 'YOUR_API_KEY_HERE'; // <-- put your API Ninjas key here
+    const API_NINJAS_KEY = '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel'; // <-- put your API Ninjas key here
     const API_URL = 'https://api.api-ninjas.com/v1/imagetotext';
 
     // ====== DOM
@@ -218,7 +218,7 @@
 
     // ====== OCR via API Ninjas
     async function ocrWithApiNinjas(fileOrBlob) {
-      if (!API_NINJAS_KEY || API_NINJAS_KEY === 'YOUR_API_KEY_HERE') {
+      if (!API_NINJAS_KEY || API_NINJAS_KEY === '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel') {
         throw new Error('Missing API key. Open index.html and set API_NINJAS_KEY.');
       }
       const form = new FormData();
