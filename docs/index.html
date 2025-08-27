@@ -47,6 +47,7 @@
     <div class="row actions split">
       <button id="saveBtn" disabled>Save Entry</button>
       <button id="exportBtn" class="secondary">Export to Excel</button>
+      <button id="exportPdfBtn" class="secondary">Export to PDF</button>
       <button id="connectFileBtn" class="ghost">Link Local File</button>
       <span id="linkStatus" class="hint">No linked file</span>
       <span class="switch">
@@ -81,15 +82,18 @@
     </table>
 
     <p class="hint" style="margin-top:.75rem">
-      OCR: API Ninjas Image-to-Text. Replace <strong>YOUR_API_KEY_HERE</strong> in the code.  
-      If the system picker is blocked (Remote Desktop), we store a single rolling file in the browser (OPFS) and still let you export anytime.
+      OCR: API Ninjas Image-to-Text. Replace <strong>YOUR_API_KEY_HERE</strong> below.  
+      If your Remote Desktop blocks the file picker, we auto-store a rolling Excel in the browser (OPFS), and PDF export is always available.
     </p>
   </div>
 
   <!-- SheetJS for Excel -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
-  <!-- FileSaver (download fallback) -->
+  <!-- FileSaver for downloads -->
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <!-- jsPDF + AutoTable for PDF export -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 
   <script>
     // ====== CONFIG ======
@@ -111,6 +115,7 @@
 
     const saveBtn         = document.getElementById('saveBtn');
     const exportBtn       = document.getElementById('exportBtn');
+    const exportPdfBtn    = document.getElementById('exportPdfBtn');
     const connectFileBtn  = document.getElementById('connectFileBtn');
     const linkStatus      = document.getElementById('linkStatus');
     const tbody           = document.querySelector('#entriesTable tbody');
@@ -118,7 +123,7 @@
     // ====== Data
     let entries = [];
 
-    // ---- Option B state: picker / OPFS / fallback
+    // ---- File linking state: picker / OPFS / fallback
     let fileHandle = null;         // native picker handle
     let opfsFileHandle = null;     // OPFS handle (browser storage)
     let useOPFS = JSON.parse(localStorage.getItem('ia_use_opfs') || 'false');
@@ -329,16 +334,13 @@
       }
     });
 
-    // ====== Option B: Picker → OPFS → Auto-download
-
-    // one-at-a-time write lock (prevents overlapping writes)
+    // ====== Linking/Storage: Picker → OPFS → Auto-download
     let _xlsxWriteLock = Promise.resolve();
     function _queueWrite(task) {
       const run = _xlsxWriteLock.then(task, task);
       _xlsxWriteLock = run.catch(() => {}); // keep chain alive
       return run;
     }
-
     function fsSupported(){ return 'showSaveFilePicker' in window; }
     function opfsSupported(){ return !!(navigator.storage && navigator.storage.getDirectory); }
 
@@ -354,13 +356,12 @@
       if (!opfsFileHandle) await ensureOPFSFile();
       const ws = await opfsFileHandle.createWritable();
       try {
-        await ws.truncate(0);          // important: clear previous bytes
+        await ws.truncate(0);
         await ws.write(blob);
       } finally {
         await ws.close();
       }
     }
-
     function setLinkStatus(){
       if (fileHandle) {
         linkStatus.textContent = 'Linked ✔ (picker)';
@@ -384,7 +385,6 @@
         connectFileBtn.style.display = '';
       }
     }
-
     async function connectLocalFile(){
       connectFileBtn.disabled = true;
       try{
@@ -419,12 +419,11 @@
       } finally {
         connectFileBtn.disabled = false;
         setLinkStatus();
-        await updateLinkedFile(); // create/update immediately so file exists
+        await updateLinkedFile(); // create/update immediately
       }
     }
     connectFileBtn.addEventListener('click', connectLocalFile);
 
-    // Build a fresh XLSX Blob from current entries
     function buildXlsxBlob() {
       const wsData = [['Date','Vendor','Category','Amount','Tax'],
         ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
@@ -436,37 +435,22 @@
       });
     }
 
-    // Unified writer: picker file → OPFS → auto-download (with truncate + lock)
     async function updateLinkedFile(){
       return _queueWrite(async () => {
         const blob = buildXlsxBlob();
-
         try {
           if (fileHandle) {
             const w = await fileHandle.createWritable();
-            try {
-              await w.truncate(0);     // critical to avoid leftover bytes
-              await w.write(blob);
-            } finally {
-              await w.close();
-            }
+            try { await w.truncate(0); await w.write(blob); } finally { await w.close(); }
             return;
           }
-          if (useOPFS && opfsSupported()) {
-            await writeOPFS(blob);
-            return;
-          }
-        } catch (err) {
-          console.error('Writing linked file failed:', err);
-          // fall through to download
-        }
-
-        // Last resort: download a clean copy so the user still gets a rolling file
-        saveAs(blob, 'image-accountant-entries.xlsx');
+          if (useOPFS && opfsSupported()) { await writeOPFS(blob); return; }
+        } catch (err) { console.error('Writing linked file failed:', err); }
+        saveAs(blob, 'image-accountant-entries.xlsx'); // last resort
       });
     }
 
-    // ====== Save & Export
+    // ====== Save & Export (Excel + PDF)
     saveBtn.addEventListener('click', async () => {
       const entry = {
         vendor:(vendorInput.value||'').trim(),
@@ -490,6 +474,53 @@
       if (!entries.length){ alert('No entries to export.'); return; }
       const blob = buildXlsxBlob();
       saveAs(blob, 'image-accountant-entries.xlsx');
+    });
+
+    // NEW: Export to PDF (summary table + totals)
+    exportPdfBtn.addEventListener('click', () => {
+      if (!entries.length){ alert('No entries to export.'); return; }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+      const title = 'Image Accountant — Receipts Summary';
+      doc.setFont('helvetica','bold'); doc.setFontSize(14);
+      doc.text(title, 40, 40);
+
+      // table data
+      const body = entries.map(e => [
+        e.date || '',
+        e.vendor || '',
+        e.category || '',
+        (e.amount!=null ? Number(e.amount).toFixed(2) : ''),
+        (e.tax!=null ? Number(e.tax).toFixed(2) : '')
+      ]);
+      const totalAmount = entries.reduce((s,e)=> s + (Number(e.amount)||0), 0);
+      const totalTax    = entries.reduce((s,e)=> s + (Number(e.tax)||0), 0);
+
+      doc.autoTable({
+        startY: 60,
+        head: [['Date','Vendor','Category','Total','Tax']],
+        body,
+        styles: { fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: [238,242,247], textColor: 20 },
+        columnStyles: {
+          3: { halign: 'right' },
+          4: { halign: 'right' }
+        },
+        didDrawPage: (data) => {
+          doc.setFont('helvetica','normal'); doc.setFontSize(8);
+          const page = doc.internal.getNumberOfPages();
+          doc.text(`Page ${page}`, doc.internal.pageSize.getWidth()-60, doc.internal.pageSize.getHeight()-20);
+        }
+      });
+
+      // Totals footer
+      const y = doc.lastAutoTable.finalY + 20;
+      doc.setFont('helvetica','bold'); doc.setFontSize(11);
+      doc.text(`Total (Amount): ${totalAmount.toFixed(2)}`, 40, y);
+      doc.text(`Total (Tax): ${totalTax.toFixed(2)}`, 40, y + 16);
+
+      doc.save('image-accountant-entries.pdf');
     });
 
     // ====== Init
