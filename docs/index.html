@@ -81,7 +81,8 @@
     </table>
 
     <p class="hint" style="margin-top:.75rem">
-      OCR: API Ninjas Image-to-Text. Replace <strong>700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel</strong> in the code. If file linking is blocked by Remote Desktop, we use browser storage (OPFS) automatically.
+      OCR: API Ninjas Image-to-Text. Replace <strong>YOUR_API_KEY_HERE</strong> in the code.  
+      If the system picker is blocked (Remote Desktop), we store a single rolling file in the browser (OPFS) and still let you export anytime.
     </p>
   </div>
 
@@ -92,7 +93,7 @@
 
   <script>
     // ====== CONFIG ======
-    const API_NINJAS_KEY = '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel'; // <-- put your API Ninjas key here
+    const API_NINJAS_KEY = 'YOUR_API_KEY_HERE'; // <-- put your API Ninjas key here
     const API_URL = 'https://api.api-ninjas.com/v1/imagetotext';
 
     // ====== DOM
@@ -116,6 +117,7 @@
 
     // ====== Data
     let entries = [];
+
     // ---- Option B state: picker / OPFS / fallback
     let fileHandle = null;         // native picker handle
     let opfsFileHandle = null;     // OPFS handle (browser storage)
@@ -328,6 +330,15 @@
     });
 
     // ====== Option B: Picker → OPFS → Auto-download
+
+    // one-at-a-time write lock (prevents overlapping writes)
+    let _xlsxWriteLock = Promise.resolve();
+    function _queueWrite(task) {
+      const run = _xlsxWriteLock.then(task, task);
+      _xlsxWriteLock = run.catch(() => {}); // keep chain alive
+      return run;
+    }
+
     function fsSupported(){ return 'showSaveFilePicker' in window; }
     function opfsSupported(){ return !!(navigator.storage && navigator.storage.getDirectory); }
 
@@ -339,11 +350,15 @@
       useOPFS = true;
       localStorage.setItem('ia_use_opfs', 'true');
     }
-    async function writeOPFS(binaryArrayBuffer) {
+    async function writeOPFS(blob) {
       if (!opfsFileHandle) await ensureOPFSFile();
       const ws = await opfsFileHandle.createWritable();
-      await ws.write(binaryArrayBuffer);
-      await ws.close();
+      try {
+        await ws.truncate(0);          // important: clear previous bytes
+        await ws.write(blob);
+      } finally {
+        await ws.close();
+      }
     }
 
     function setLinkStatus(){
@@ -404,35 +419,51 @@
       } finally {
         connectFileBtn.disabled = false;
         setLinkStatus();
-        await updateLinkedFile(); // create/update immediately
+        await updateLinkedFile(); // create/update immediately so file exists
       }
     }
     connectFileBtn.addEventListener('click', connectLocalFile);
 
-    async function updateLinkedFile(){
+    // Build a fresh XLSX Blob from current entries
+    function buildXlsxBlob() {
       const wsData = [['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e=>[e.date,e.vendor,e.category,e.amount,e.tax])];
+        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const wbout = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+      const ab = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+      return new Blob([ab], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+    }
 
-      try {
-        if (fileHandle) {
-          const w = await fileHandle.createWritable();
-          await w.write(wbout);
-          await w.close();
-          return;
+    // Unified writer: picker file → OPFS → auto-download (with truncate + lock)
+    async function updateLinkedFile(){
+      return _queueWrite(async () => {
+        const blob = buildXlsxBlob();
+
+        try {
+          if (fileHandle) {
+            const w = await fileHandle.createWritable();
+            try {
+              await w.truncate(0);     // critical to avoid leftover bytes
+              await w.write(blob);
+            } finally {
+              await w.close();
+            }
+            return;
+          }
+          if (useOPFS && opfsSupported()) {
+            await writeOPFS(blob);
+            return;
+          }
+        } catch (err) {
+          console.error('Writing linked file failed:', err);
+          // fall through to download
         }
-        if (useOPFS && opfsSupported()) {
-          await writeOPFS(wbout);
-          return;
-        }
-      } catch (err) {
-        console.error('Writing linked file failed:', err);
-        // fall through
-      }
-      // Last resort: auto-download so user still gets a rolling file on disk
-      saveAs(new Blob([wbout], { type:'application/octet-stream' }), 'image-accountant-entries.xlsx');
+
+        // Last resort: download a clean copy so the user still gets a rolling file
+        saveAs(blob, 'image-accountant-entries.xlsx');
+      });
     }
 
     // ====== Save & Export
@@ -457,19 +488,14 @@
 
     exportBtn.addEventListener('click', () => {
       if (!entries.length){ alert('No entries to export.'); return; }
-      const wsData = [['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e=>[e.date,e.vendor,e.category,e.amount,e.tax])];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-      saveAs(new Blob([wbout], { type:'application/octet-stream' }), 'image-accountant-entries.xlsx');
+      const blob = buildXlsxBlob();
+      saveAs(blob, 'image-accountant-entries.xlsx');
     });
 
     // ====== Init
     async function init(){
       loadEntries();
       updateSaveButton();
-      // If user previously chose OPFS, re-open it silently
       if (useOPFS && opfsSupported()) {
         try { await ensureOPFSFile(); } catch(e){ console.warn('OPFS init failed', e); }
       }
