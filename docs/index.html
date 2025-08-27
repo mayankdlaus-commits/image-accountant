@@ -1,39 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Image Accountant</title>
   <style>
     :root { --bg:#f8f9fa; --fg:#212529; --muted:#6c757d; --border:#dee2e6; --card:#fff; --brand:#007bff; }
-    * { box-sizing: border-box; }
-    body { margin: 0; padding: 2rem; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    h1 { text-align: center; margin: 0 0 1.5rem; }
-    .container { max-width: 900px; margin: 0 auto; background: var(--card); padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
-    .actions { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
-    .hint { color: var(--muted); font-size: .9rem; }
-    input[type="file"] { display: inline-block; }
-    .grid { display: grid; grid-template-columns: 140px 1fr; gap: .5rem .75rem; margin-top: 1rem; }
-    label { align-self: center; text-align: right; color: #444; }
-    input, select { padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 8px; }
-    button { appearance: none; border: 0; padding: .55rem .9rem; border-radius: 8px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
-    button.secondary { background: #495057; }
-    button.ghost { background: #e9ecef; color: #111; }
-    button:disabled { background: var(--muted); cursor: not-allowed; }
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-    th, td { padding: .6rem .5rem; border: 1px solid var(--border); text-align: left; }
-    th { background: #eef2f7; }
-    .footer-note { margin-top: .75rem; color: var(--muted); font-size: .9rem; }
-    .ok { color: #2f8f46; font-weight: 600; }
-    .warn { color: #b35b00; font-weight: 600; }
+    *{box-sizing:border-box}
+    body{margin:0;padding:2rem;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    h1{margin:0 0 1.5rem;text-align:center}
+    .container{max-width:900px;margin:0 auto;background:var(--card);padding:1.5rem;border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08)}
+    .actions{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem}
+    .hint{color:var(--muted);font-size:.9rem}
+    .grid{display:grid;grid-template-columns:140px 1fr;gap:.5rem .75rem;margin-top:1rem}
+    label{align-self:center;text-align:right;color:#444}
+    input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px}
+    button{appearance:none;border:0;padding:.55rem .9rem;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
+    button.secondary{background:#495057}.ghost{background:#e9ecef;color:#111}
+    button:disabled{background:var(--muted);cursor:not-allowed}
+    table{width:100%;border-collapse:collapse;margin-top:1rem}
+    th,td{padding:.6rem .5rem;border:1px solid var(--border);text-align:left}
+    th{background:#eef2f7}
+    .footer-note{margin-top:.75rem;color:var(--muted);font-size:.9rem}
+    .ok{color:#2f8f46;font-weight:600}.warn{color:#b35b00;font-weight:600}
+    .preview{max-height:240px;max-width:100%;object-fit:contain;border:1px dashed var(--border);border-radius:10px;padding:6px;background:#fff}
+    .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+    progress{width:200px;height:10px;border-radius:6px}
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Image Accountant</h1>
 
-    <div class="actions">
+    <div class="actions row">
       <input type="file" id="fileInput" accept="image/*" />
+      <img id="preview" class="preview" alt="" />
+      <progress id="ocrProgress" max="1" value="0" style="display:none"></progress>
+      <span id="ocrStatus" class="hint"></span>
+    </div>
+
+    <div class="actions">
       <button id="saveBtn" disabled>Save Entry</button>
       <button id="exportBtn" class="secondary">Export to Excel</button>
       <button id="connectFileBtn" class="ghost">Link Local File</button>
@@ -62,63 +68,61 @@
 
     <table id="entriesTable">
       <thead>
-        <tr>
-          <th>Date</th><th>Vendor</th><th>Category</th><th>Amount</th><th>Tax</th>
-        </tr>
+        <tr><th>Date</th><th>Vendor</th><th>Category</th><th>Amount</th><th>Tax</th></tr>
       </thead>
       <tbody></tbody>
     </table>
 
     <div class="footer-note">
-      OCR runs fully in your browser. Linked local file works in Chromium browsers (Chrome/Edge). If the link is lost after a restart, just click <em>Link Local File</em> again.
+      OCR runs fully in your browser. For best results, upload sharp photos or PDFs.
+      Linked local file works in Chromium browsers (Chrome/Edge). If the link is lost after a restart, click <em>Link Local File</em> again.
     </div>
   </div>
 
-  <!-- OCR -->
-  <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
-  <!-- Excel build -->
+  <!-- Tesseract.js v5 (faster & better accuracy) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+  <!-- SheetJS -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
-  <!-- Download fallback -->
+  <!-- FileSaver -->
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 
   <script>
-    // --- Elements
+    // Elements
     const fileInput       = document.getElementById('fileInput');
+    const preview         = document.getElementById('preview');
+    const ocrProgress     = document.getElementById('ocrProgress');
+    const ocrStatus       = document.getElementById('ocrStatus');
+
     const vendorInput     = document.getElementById('vendorInput');
     const dateInput       = document.getElementById('dateInput');
     const amountInput     = document.getElementById('amountInput');
     const taxInput        = document.getElementById('taxInput');
     const categoryInput   = document.getElementById('categoryInput');
+
     const saveBtn         = document.getElementById('saveBtn');
     const exportBtn       = document.getElementById('exportBtn');
     const connectFileBtn  = document.getElementById('connectFileBtn');
     const linkStatus      = document.getElementById('linkStatus');
     const tbody           = document.querySelector('#entriesTable tbody');
 
-    // --- Data
+    // Data
     let entries = [];
     let fileHandle = null; // File System Access API handle (session only)
 
-    // --- Save button state from manual inputs
     function updateSaveButton() {
       const ok = vendorInput.value.trim() && dateInput.value && amountInput.value;
       saveBtn.disabled = !ok;
     }
     [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
 
-    // --- Storage helpers (localStorage for persistence)
     function loadEntries() {
       const raw = localStorage.getItem('image_accountant_entries');
-      if (raw) {
-        try { entries = JSON.parse(raw) || []; } catch { entries = []; }
-      }
+      if (raw) { try { entries = JSON.parse(raw) || []; } catch { entries = []; } }
       renderEntries();
     }
     function saveEntries() {
       localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
     }
-
-    // --- Table render
     function renderEntries() {
       tbody.innerHTML = '';
       for (const e of entries) {
@@ -128,98 +132,244 @@
           <td>${e.vendor || ''}</td>
           <td>${e.category || ''}</td>
           <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
-          <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>
-        `;
+          <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
         tbody.appendChild(tr);
       }
     }
 
-    // --- Naive OCR parsing
-    function parseReceipt(text) {
-      const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    // ---------- Image Preprocessing (HUGE accuracy boost) ----------
+    // Scales up to ~300–450 DPI, converts to grayscale, normalizes contrast, and adaptive thresholds
+    function preprocessImageToDataURL(imgEl) {
+      const MAX_SIDE = 2200; // upscale target
+      const w = imgEl.naturalWidth, h = imgEl.naturalHeight;
+      const scale = Math.min(MAX_SIDE / Math.max(w, h), 3); // avoid insane zoom
+      const cw = Math.round(w * Math.max(1, scale));
+      const ch = Math.round(h * Math.max(1, scale));
 
-      // Vendor: first non-numeric looking line
+      const c1 = document.createElement('canvas'); c1.width = cw; c1.height = ch;
+      const g1 = c1.getContext('2d', { willReadFrequently: true });
+      g1.imageSmoothingEnabled = true;
+      g1.imageSmoothingQuality = 'high';
+      g1.drawImage(imgEl, 0, 0, cw, ch);
+
+      const img = g1.getImageData(0, 0, cw, ch);
+      const d = img.data;
+
+      // grayscale + contrast stretch
+      let min=255, max=0;
+      for (let i=0;i<d.length;i+=4){
+        const gray = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+        if (gray<min) min=gray; if (gray>max) max=gray;
+      }
+      const spread = Math.max(1, max-min);
+      for (let i=0;i<d.length;i+=4){
+        let gray = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+        gray = (gray - min) * (255/spread); // stretch
+        const v = gray|0;
+        d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+      }
+      g1.putImageData(img,0,0);
+
+      // simple adaptive threshold (box 15 × 15)
+      const box = 15, half = box>>1;
+      const g2 = c1.getContext('2d');
+      const src = g2.getImageData(0,0,cw,ch); const sd = src.data;
+      const out = g2.createImageData(cw,ch); const od = out.data;
+
+      // integral image for fast local mean
+      const S = new Uint32Array((cw+1)*(ch+1));
+      for (let y=1;y<=ch;y++){
+        let rowsum=0, idx=y*(cw+1);
+        for (let x=1;x<=cw;x++){
+          const p = ((y-1)*cw + (x-1))<<2;
+          rowsum += sd[p]; // grayscale in R
+          S[idx+x] = S[(y-1)*(cw+1)+x] + rowsum;
+        }
+      }
+      for (let y=0;y<ch;y++){
+        const y0 = Math.max(0,y-half), y1 = Math.min(ch-1,y+half);
+        for (let x=0;x<cw;x++){
+          const x0 = Math.max(0,x-half), x1 = Math.min(cw-1,x+half);
+          const count = (x1-x0+1)*(y1-y0+1);
+          const sum = S[y1+1*(cw+1) + (x1+1)] + S[y0*(cw+1) + x0] - S[(y0)*(cw+1) + (x1+1)] - S[(y1+1)*(cw+1) + x0];
+          const mean = sum / count;
+          const pix = sd[((y*cw)+x)<<2];
+          const v = pix < mean*0.93 ? 0 : 255; // 7% below local mean -> black
+          const q = ((y*cw)+x)<<2; od[q]=od[q+1]=od[q+2]=v; od[q+3]=255;
+        }
+      }
+      g2.putImageData(out,0,0);
+      return c1.toDataURL('image/png');
+    }
+
+    // ---------- OCR (dual-pass) ----------
+    async function runOCR(dataURL, psm) {
+      const { createWorker } = Tesseract;
+      const worker = await createWorker({
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            ocrProgress.style.display = '';
+            ocrProgress.value = m.progress || 0;
+            ocrStatus.textContent = `OCR ${(m.progress*100).toFixed(0)}% (psm ${psm})`;
+          }
+        }
+      });
+      try {
+        await worker.loadLanguage('eng');
+        await worker.initialize('eng');
+        await worker.setParameters({
+          tessedit_pageseg_mode: String(psm), // 6 = uniform block, 4 = column
+          preserve_interword_spaces: '1',
+          // bias a bit towards digits & currency
+          tessedit_char_blacklist: '',
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$€£.,:-/# '
+        });
+        const res = await worker.recognize(dataURL);
+        return res;
+      } finally {
+        await worker.terminate();
+      }
+    }
+
+    function avgConfidence(words) {
+      if (!words || !words.length) return 0;
+      return words.reduce((s,w)=>s+(w.confidence||0),0)/words.length;
+    }
+
+    // ---------- Robust parsing ----------
+    function parseReceipt(fullText) {
+      const text = fullText.replace(/[^\S\r\n]+/g,' ').trim();
+      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+
+      // Vendor: look near top before a line that contains "INVOICE" or "Invoice" or a table header line
       let vendor = '';
-      for (const line of lines) {
-        if (/[A-Za-z]/.test(line) && !/^\d+([.,]\d+)*$/.test(line)) { vendor = line; break; }
+      for (let i=0;i<Math.min(lines.length,10);i++){
+        const l = lines[i];
+        if (/invoice\s*#|invoice\b/i.test(l)) break;
+        if (l.length >= 3 && /[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) {
+          vendor = l.replace(/\s{2,}.*/,''); // take first chunk
+          if (!/invoice\b/i.test(vendor)) break;
+        }
       }
 
-      // Date: try common patterns
-      const datePatterns = [
-        /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/,      // yyyy-mm-dd
-        /(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/,    // dd/mm/yyyy or mm/dd/yyyy
+      // Date: support many formats, including with month names
+      const dateRegexes = [
+        /\b(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\b/,                            // 2025-08-26
+        /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})\b/,                          // 26/08/2025 or 08/26/25
+        /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[ ,.-]+(\d{4})\b/i, // 26 Aug 2025
+        /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i    // Aug 26, 2025
       ];
       let dateISO = '';
-      outer: for (const rx of datePatterns) {
-        for (const line of lines) {
-          const m = line.match(rx);
+      for (const rx of dateRegexes) {
+        for (const l of lines) {
+          const m = l.match(rx);
           if (m) {
-            if (m[1].length === 4) {
-              // yyyy, mm, dd
-              const y = m[1], mm = m[2].padStart(2,'0'), dd = m[3].padStart(2,'0');
-              dateISO = `${y}-${mm}-${dd}`; break outer;
-            } else {
-              // dd/mm/yyyy or mm/dd/yyyy -> guess
-              let d = parseInt(m[1],10), mo = parseInt(m[2],10), y = m[3];
-              if (String(y).length === 2) y = '20'+y;
-              if (mo > 12) [d, mo] = [mo, d];
-              dateISO = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer;
+            if (rx === dateRegexes[0]) { // yyyy-mm-dd
+              const y=m[1], mo=m[2].padStart(2,'0'), d=m[3].padStart(2,'0');
+              dateISO = `${y}-${mo}-${d}`; break;
+            }
+            if (rx === dateRegexes[1]) { // dd/mm/yyyy or mm/dd/yyyy
+              let d = parseInt(m[1],10), mo=parseInt(m[2],10), y=m[3];
+              if (String(y).length===2) y='20'+y;
+              if (mo>12){ [d,mo]=[mo,d]; }
+              dateISO = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break;
+            }
+            // with month names
+            const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+            if (rx === dateRegexes[2]) {
+              const d=m[1], mm=monthMap[m[2].slice(0,3).toLowerCase()], y=m[3];
+              dateISO = `${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break;
+            }
+            if (rx === dateRegexes[3]) {
+              const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3];
+              dateISO = `${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break;
             }
           }
         }
+        if (dateISO) break;
       }
 
-      // Amounts
-      const numRx = /\d+\.\d{2}/g;
-      const nums = [];
-      for (const line of lines) {
-        const m = line.match(numRx);
-        if (m) nums.push(...m.map(Number));
-      }
-      nums.sort((a,b)=>a-b);
-      const amount = nums.length ? nums[nums.length-1] : null;
+      // Currency numbers with $ and commas
+      const moneyRx = /(?:[\$£€]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
 
-      // Tax (look for GST/TAX line, else assume 10%)
-      let tax = null;
-      for (const line of lines) {
-        if (/\b(gst|tax|vat)\b/i.test(line)) {
-          const m = line.match(numRx);
-          if (m && m.length) { tax = Number(m[m.length-1]); break; }
+      // Totals-first strategy
+      let amount = null, tax = null;
+      for (let i=lines.length-1;i>=0;i--){
+        const l = lines[i];
+        if (/total\b/i.test(l)) {
+          const ms = l.match(moneyRx);
+          if (ms && ms.length) { amount = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
         }
       }
-      if (tax == null && amount != null) tax = Number((amount * 0.1).toFixed(2));
+      // Tax line
+      for (const l of lines) {
+        if (/\b(gst|tax|vat)\b/i.test(l)) {
+          const ms = l.match(moneyRx);
+          if (ms && ms.length) { tax = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
+        }
+      }
+      // Fallback: pick the largest as total if still null
+      if (amount == null) {
+        const nums=[];
+        for (const l of lines) {
+          const ms = l.match(moneyRx);
+          if (ms) nums.push(...ms.map(s => parseFloat(s.replace(/[^\d.]/g,''))));
+        }
+        nums.sort((a,b)=>a-b);
+        if (nums.length) amount = nums[nums.length-1];
+      }
+      if (tax == null && amount != null) tax = Number((amount*0.1).toFixed(2));
 
-      return { vendor, dateISO, amount, tax };
+      return { vendor, dateISO, amount, tax, raw: text };
     }
 
-    // --- OCR via Tesseract on file change
+    // ---------- File input handling ----------
     fileInput.addEventListener('change', async () => {
       const file = fileInput.files?.[0];
       if (!file) return;
-      saveBtn.disabled = true;
 
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const result = await Tesseract.recognize(reader.result, 'eng');
-          const text = result.data.text || '';
+      // preview
+      const url = URL.createObjectURL(file);
+      preview.src = url;
+
+      try {
+        // load into <img> to get natural size
+        const img = new Image();
+        img.onload = async () => {
+          const dataURL = preprocessImageToDataURL(img);
+
+          // Two OCR passes: PSM 6 and PSM 4; pick higher confidence
+          ocrProgress.style.display = '';
+          ocrStatus.textContent = 'Starting OCR…';
+          const [r6, r4] = await Promise.all([
+            runOCR(dataURL, 6),
+            runOCR(dataURL, 4),
+          ]);
+          ocrProgress.style.display = 'none';
+          ocrStatus.textContent = '';
+
+          const best = avgConfidence(r6.data.words) >= avgConfidence(r4.data.words) ? r6 : r4;
+          const text = best.data.text || '';
+
           const { vendor, dateISO, amount, tax } = parseReceipt(text);
-
           if (vendor) vendorInput.value = vendor;
           if (dateISO) dateInput.value = dateISO;
           if (amount != null) amountInput.value = amount;
-          if (tax != null) taxInput.value = tax;
-
+          if (tax != null)   taxInput.value = tax;
           updateSaveButton();
-        } catch (err) {
-          console.error(err);
-          alert('OCR failed. You can still fill fields manually.');
-        }
-      };
-      reader.readAsDataURL(file);
+
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      } catch (err) {
+        console.error(err);
+        alert('OCR failed. Try a sharper photo, or fill the fields manually.');
+        ocrProgress.style.display = 'none';
+        ocrStatus.textContent = '';
+      }
     });
 
-    // --- File System Access API helpers (Chrome/Edge)
+    // ---------- File System Access API (optional single-file rolling log) ----------
     const fsSupported = 'showSaveFilePicker' in window;
     function setLinkStatus() {
       if (!fsSupported) {
@@ -228,97 +378,71 @@
         connectFileBtn.style.display = 'none';
         return;
       }
-      if (fileHandle) {
-        linkStatus.innerHTML = 'Linked ✔';
-        linkStatus.className = 'hint ok';
-      } else {
-        linkStatus.innerHTML = 'No linked file';
-        linkStatus.className = 'hint';
-      }
+      if (fileHandle) { linkStatus.innerHTML = 'Linked ✔'; linkStatus.className='hint ok'; }
+      else { linkStatus.innerHTML='No linked file'; linkStatus.className='hint'; }
     }
     setLinkStatus();
 
     async function connectLocalFile() {
-      if (!fsSupported) { alert('Your browser does not support this feature. Use Chrome/Edge.'); return; }
+      if (!fsSupported) { alert('Use Chrome or Edge to link a file.'); return; }
       try {
         fileHandle = await window.showSaveFilePicker({
           suggestedName: 'image-accountant-entries.xlsx',
           types: [{
-            description: 'Excel',
-            accept: {
-              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-            },
-          }],
+            description:'Excel',
+            accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}
+          }]
         });
-        await updateLinkedFile(); // write current entries immediately
+        await updateLinkedFile();
         setLinkStatus();
         alert('Local file linked. New entries will update this file.');
       } catch (err) {
-        if (err && err.name === 'AbortError') return; // user canceled
-        console.error(err);
-        alert('Could not link file.');
+        if (err?.name === 'AbortError') return;
+        console.error(err); alert('Could not link file.');
       }
     }
-
     async function updateLinkedFile() {
       if (!fileHandle) return;
-      // Build workbook from entries
-      const wsData = [
-        ['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax]),
-      ];
+      const wsData = [['Date','Vendor','Category','Amount','Tax'],
+        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
       const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet(wsData);
-      XLSX.utils.book_append_sheet(wb, ws, 'Receipts');
-      const wbout = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-
-      const writable = await fileHandle.createWritable();
-      await writable.write(wbout);
-      await writable.close();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
+      const wbout = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+      const w = await fileHandle.createWritable(); await w.write(wbout); await w.close();
     }
-
     connectFileBtn.addEventListener('click', connectLocalFile);
 
-    // --- Save one entry
+    // ---------- Save entry / Export ----------
     saveBtn.addEventListener('click', async () => {
       const entry = {
-        vendor  : (vendorInput.value || '').trim(),
-        date    : dateInput.value || '',
-        amount  : amountInput.value ? Number(amountInput.value) : null,
-        tax     : taxInput.value ? Number(taxInput.value) : null,
-        category: categoryInput.value || 'General',
+        vendor: (vendorInput.value||'').trim(),
+        date: dateInput.value||'',
+        amount: amountInput.value ? Number(amountInput.value) : null,
+        tax: taxInput.value ? Number(taxInput.value) : null,
+        category: categoryInput.value||'General',
       };
       entries.push(entry);
       saveEntries();
       renderEntries();
 
-      // Reset form
-      vendorInput.value = '';
-      dateInput.value = '';
-      amountInput.value = '';
-      taxInput.value = '';
-      categoryInput.value = 'General';
-      fileInput.value = '';
-      updateSaveButton();
+      vendorInput.value = ''; dateInput.value=''; amountInput.value='';
+      taxInput.value=''; categoryInput.value='General'; fileInput.value='';
+      preview.src=''; updateSaveButton();
 
-      // If linked to a local file, update it too
       try { await updateLinkedFile(); } catch (e) { console.error(e); alert('Could not update linked file.'); }
     });
 
-    // --- Export (download) as Excel (fallback when not linking a file)
     exportBtn.addEventListener('click', () => {
       if (!entries.length) { alert('No entries to export.'); return; }
-      const wsData = [
-        ['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax]),
-      ];
+      const wsData = [['Date','Vendor','Category','Amount','Tax'],
+        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      saveAs(new Blob([wbout], { type: 'application/octet-stream' }), 'image-accountant-entries.xlsx');
+      const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+      saveAs(new Blob([wbout], { type:'application/octet-stream' }), 'image-accountant-entries.xlsx');
     });
 
-    // --- Init
+    // Init
     loadEntries();
     updateSaveButton();
   </script>
