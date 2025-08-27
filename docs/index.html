@@ -1,329 +1,326 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Image Accountant</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 2rem;
-        background-color: #f8f9fa;
-        color: #212529;
-      }
-      h1 {
-        text-align: center;
-        margin-bottom: 1.5rem;
-      }
-      .container {
-        max-width: 800px;
-        margin: 0 auto;
-        background: #fff;
-        padding: 1.5rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-      input[type="file"] {
-        margin-bottom: 1rem;
-      }
-      .fields {
-        display: grid;
-        grid-template-columns: 1fr 2fr;
-        row-gap: 0.5rem;
-        column-gap: 0.5rem;
-        margin-bottom: 1rem;
-      }
-      .fields label {
-        text-align: right;
-        padding-right: 0.5rem;
-      }
-      .fields input,
-      .fields select {
-        padding: 0.25rem;
-        border: 1px solid #ced4da;
-        border-radius: 4px;
-      }
-      button {
-        padding: 0.5rem 1rem;
-        margin-top: 0.5rem;
-        border: none;
-        border-radius: 4px;
-        background-color: #007bff;
-        color: #fff;
-        cursor: pointer;
-      }
-      button:disabled {
-        background-color: #6c757d;
-        cursor: not-allowed;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 1rem;
-      }
-      th,
-      td {
-        padding: 0.5rem;
-        border: 1px solid #dee2e6;
-        text-align: left;
-      }
-      th {
-        background-color: #e9ecef;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>Image Accountant</h1>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Image Accountant</title>
+  <style>
+    :root { --bg:#f8f9fa; --fg:#212529; --muted:#6c757d; --border:#dee2e6; --card:#fff; --brand:#007bff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 2rem; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    h1 { text-align: center; margin: 0 0 1.5rem; }
+    .container { max-width: 900px; margin: 0 auto; background: var(--card); padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+    .actions { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+    .hint { color: var(--muted); font-size: .9rem; }
+    input[type="file"] { display: inline-block; }
+    .grid { display: grid; grid-template-columns: 140px 1fr; gap: .5rem .75rem; margin-top: 1rem; }
+    label { align-self: center; text-align: right; color: #444; }
+    input, select { padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 8px; }
+    button { appearance: none; border: 0; padding: .55rem .9rem; border-radius: 8px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #495057; }
+    button.ghost { background: #e9ecef; color: #111; }
+    button:disabled { background: var(--muted); cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: .6rem .5rem; border: 1px solid var(--border); text-align: left; }
+    th { background: #eef2f7; }
+    .footer-note { margin-top: .75rem; color: var(--muted); font-size: .9rem; }
+    .ok { color: #2f8f46; font-weight: 600; }
+    .warn { color: #b35b00; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Image Accountant</h1>
+
+    <div class="actions">
       <input type="file" id="fileInput" accept="image/*" />
-      <div class="fields">
-        <label for="vendorInput">Vendor:</label>
-        <input id="vendorInput" type="text" />
-        <label for="dateInput">Date:</label>
-        <input id="dateInput" type="date" />
-        <label for="amountInput">Amount:</label>
-        <input id="amountInput" type="number" step="0.01" />
-        <label for="taxInput">Tax:</label>
-        <input id="taxInput" type="number" step="0.01" />
-        <label for="categoryInput">Category:</label>
-        <select id="categoryInput">
-          <option value="General">General</option>
-          <option value="Travel">Travel</option>
-          <option value="Meals">Meals</option>
-          <option value="Supplies">Supplies</option>
-          <option value="Fuel">Fuel</option>
-          <option value="Maintenance">Maintenance</option>
-        </select>
-      </div>
       <button id="saveBtn" disabled>Save Entry</button>
-      <button id="exportBtn">Export to Excel</button>
-      <table id="entriesTable">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Vendor</th>
-            <th>Category</th>
-            <th>Amount</th>
-            <th>Tax</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+      <button id="exportBtn" class="secondary">Export to Excel</button>
+      <button id="connectFileBtn" class="ghost">Link Local File</button>
+      <span id="linkStatus" class="hint">No linked file</span>
     </div>
-    <!-- Tesseract.js for OCR -->
-    <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
-    <!-- SheetJS for Excel export -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
-    <!-- FileSaver for saving files -->
-    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-    <script>
-      const fileInput = document.getElementById('fileInput');
-      const vendorInput = document.getElementById('vendorInput');
-      const dateInput = document.getElementById('dateInput');
-      const amountInput = document.getElementById('amountInput');
-      const taxInput = document.getElementById('taxInput');
-      const categoryInput = document.getElementById('categoryInput');
-      const saveBtn = document.getElementById('saveBtn');
-      const exportBtn = document.getElementById('exportBtn');
-      const entriesTableBody = document.querySelector('#entriesTable tbody');
 
-      let entries = [];
+    <div class="grid">
+      <label for="vendorInput">Vendor</label>
+      <input id="vendorInput" type="text" placeholder="e.g., 7-Eleven, Officeworks"/>
 
-      // Update the Save button based on manual inputs
-      function updateSaveButton() {
-        const hasVendor = vendorInput.value.trim() !== '';
-        const hasDate = dateInput.value !== '';
-        const hasAmount = amountInput.value !== '';
-        saveBtn.disabled = !(hasVendor && hasDate && hasAmount);
+      <label for="dateInput">Date</label>
+      <input id="dateInput" type="date"/>
+
+      <label for="amountInput">Amount</label>
+      <input id="amountInput" type="number" step="0.01" inputmode="decimal" placeholder="0.00"/>
+
+      <label for="taxInput">Tax</label>
+      <input id="taxInput" type="number" step="0.01" inputmode="decimal" placeholder="auto (10%) if empty"/>
+
+      <label for="categoryInput">Category</label>
+      <select id="categoryInput">
+        <option>General</option><option>Travel</option><option>Meals</option>
+        <option>Supplies</option><option>Fuel</option><option>Maintenance</option>
+      </select>
+    </div>
+
+    <table id="entriesTable">
+      <thead>
+        <tr>
+          <th>Date</th><th>Vendor</th><th>Category</th><th>Amount</th><th>Tax</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="footer-note">
+      OCR runs fully in your browser. Linked local file works in Chromium browsers (Chrome/Edge). If the link is lost after a restart, just click <em>Link Local File</em> again.
+    </div>
+  </div>
+
+  <!-- OCR -->
+  <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <!-- Excel build -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
+  <!-- Download fallback -->
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+  <script>
+    // --- Elements
+    const fileInput       = document.getElementById('fileInput');
+    const vendorInput     = document.getElementById('vendorInput');
+    const dateInput       = document.getElementById('dateInput');
+    const amountInput     = document.getElementById('amountInput');
+    const taxInput        = document.getElementById('taxInput');
+    const categoryInput   = document.getElementById('categoryInput');
+    const saveBtn         = document.getElementById('saveBtn');
+    const exportBtn       = document.getElementById('exportBtn');
+    const connectFileBtn  = document.getElementById('connectFileBtn');
+    const linkStatus      = document.getElementById('linkStatus');
+    const tbody           = document.querySelector('#entriesTable tbody');
+
+    // --- Data
+    let entries = [];
+    let fileHandle = null; // File System Access API handle (session only)
+
+    // --- Save button state from manual inputs
+    function updateSaveButton() {
+      const ok = vendorInput.value.trim() && dateInput.value && amountInput.value;
+      saveBtn.disabled = !ok;
+    }
+    [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
+
+    // --- Storage helpers (localStorage for persistence)
+    function loadEntries() {
+      const raw = localStorage.getItem('image_accountant_entries');
+      if (raw) {
+        try { entries = JSON.parse(raw) || []; } catch { entries = []; }
+      }
+      renderEntries();
+    }
+    function saveEntries() {
+      localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
+    }
+
+    // --- Table render
+    function renderEntries() {
+      tbody.innerHTML = '';
+      for (const e of entries) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${e.date || ''}</td>
+          <td>${e.vendor || ''}</td>
+          <td>${e.category || ''}</td>
+          <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
+          <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    // --- Naive OCR parsing
+    function parseReceipt(text) {
+      const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+      // Vendor: first non-numeric looking line
+      let vendor = '';
+      for (const line of lines) {
+        if (/[A-Za-z]/.test(line) && !/^\d+([.,]\d+)*$/.test(line)) { vendor = line; break; }
       }
 
-      // Listen for user input to enable Save button manually
-      [vendorInput, dateInput, amountInput].forEach((el) => {
-        el.addEventListener('input', updateSaveButton);
-      });
-
-      // Load existing entries from localStorage
-      function loadEntries() {
-        const stored = localStorage.getItem('image_accountant_entries');
-        if (stored) {
-          try {
-            entries = JSON.parse(stored);
-          } catch {
-            entries = [];
+      // Date: try common patterns
+      const datePatterns = [
+        /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/,      // yyyy-mm-dd
+        /(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/,    // dd/mm/yyyy or mm/dd/yyyy
+      ];
+      let dateISO = '';
+      outer: for (const rx of datePatterns) {
+        for (const line of lines) {
+          const m = line.match(rx);
+          if (m) {
+            if (m[1].length === 4) {
+              // yyyy, mm, dd
+              const y = m[1], mm = m[2].padStart(2,'0'), dd = m[3].padStart(2,'0');
+              dateISO = `${y}-${mm}-${dd}`; break outer;
+            } else {
+              // dd/mm/yyyy or mm/dd/yyyy -> guess
+              let d = parseInt(m[1],10), mo = parseInt(m[2],10), y = m[3];
+              if (String(y).length === 2) y = '20'+y;
+              if (mo > 12) [d, mo] = [mo, d];
+              dateISO = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer;
+            }
           }
         }
-        renderEntries();
       }
 
-      // Save entries to localStorage
-      function saveEntries() {
-        localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
+      // Amounts
+      const numRx = /\d+\.\d{2}/g;
+      const nums = [];
+      for (const line of lines) {
+        const m = line.match(numRx);
+        if (m) nums.push(...m.map(Number));
       }
+      nums.sort((a,b)=>a-b);
+      const amount = nums.length ? nums[nums.length-1] : null;
 
-      // Render the table
-      function renderEntries() {
-        entriesTableBody.innerHTML = '';
-        entries.forEach((entry) => {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${entry.date || ''}</td>
-            <td>${entry.vendor || ''}</td>
-            <td>${entry.category || ''}</td>
-            <td>${entry.amount != null ? entry.amount.toFixed(2) : ''}</td>
-            <td>${entry.tax != null ? entry.tax.toFixed(2) : ''}</td>
-          `;
-          entriesTableBody.appendChild(row);
+      // Tax (look for GST/TAX line, else assume 10%)
+      let tax = null;
+      for (const line of lines) {
+        if (/\b(gst|tax|vat)\b/i.test(line)) {
+          const m = line.match(numRx);
+          if (m && m.length) { tax = Number(m[m.length-1]); break; }
+        }
+      }
+      if (tax == null && amount != null) tax = Number((amount * 0.1).toFixed(2));
+
+      return { vendor, dateISO, amount, tax };
+    }
+
+    // --- OCR via Tesseract on file change
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      saveBtn.disabled = true;
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const result = await Tesseract.recognize(reader.result, 'eng');
+          const text = result.data.text || '';
+          const { vendor, dateISO, amount, tax } = parseReceipt(text);
+
+          if (vendor) vendorInput.value = vendor;
+          if (dateISO) dateInput.value = dateISO;
+          if (amount != null) amountInput.value = amount;
+          if (tax != null) taxInput.value = tax;
+
+          updateSaveButton();
+        } catch (err) {
+          console.error(err);
+          alert('OCR failed. You can still fill fields manually.');
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // --- File System Access API helpers (Chrome/Edge)
+    const fsSupported = 'showSaveFilePicker' in window;
+    function setLinkStatus() {
+      if (!fsSupported) {
+        linkStatus.innerHTML = 'Local file linking not supported in this browser';
+        linkStatus.className = 'hint warn';
+        connectFileBtn.style.display = 'none';
+        return;
+      }
+      if (fileHandle) {
+        linkStatus.innerHTML = 'Linked ✔';
+        linkStatus.className = 'hint ok';
+      } else {
+        linkStatus.innerHTML = 'No linked file';
+        linkStatus.className = 'hint';
+      }
+    }
+    setLinkStatus();
+
+    async function connectLocalFile() {
+      if (!fsSupported) { alert('Your browser does not support this feature. Use Chrome/Edge.'); return; }
+      try {
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: 'image-accountant-entries.xlsx',
+          types: [{
+            description: 'Excel',
+            accept: {
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+            },
+          }],
         });
+        await updateLinkedFile(); // write current entries immediately
+        setLinkStatus();
+        alert('Local file linked. New entries will update this file.');
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // user canceled
+        console.error(err);
+        alert('Could not link file.');
       }
+    }
 
-      // Parse OCR text to fill fields
-      function parseReceipt(text) {
-        const lines = text
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
-        // Vendor: first line with letters and not mostly numbers
-        let vendor = '';
-        for (const line of lines) {
-          if (/\D/.test(line) && line.length > 2) {
-            vendor = line;
-            break;
-          }
-        }
-        // Date: find dd/mm/yyyy or mm/dd/yyyy or yyyy-mm-dd
-        let dateMatch = null;
-        const dateRegexes = [
-          /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/, // e.g. 12/08/25 or 12-08-2025
-          /(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/,   // e.g. 2025-08-12
-        ];
-        outer: for (const regex of dateRegexes) {
-          for (const line of lines) {
-            const m = line.match(regex);
-            if (m) {
-              dateMatch = m[1];
-              break outer;
-            }
-          }
-        }
-        let dateISO = '';
-        if (dateMatch) {
-          // Normalize to yyyy-MM-dd
-          let parts;
-          if (/\d{4}[\/-]/.test(dateMatch)) {
-            parts = dateMatch.split(/[\/-]/);
-            dateISO = `${parts[0].padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-          } else {
-            parts = dateMatch.split(/[\/-]/);
-            let d1 = parseInt(parts[0], 10);
-            let m1 = parseInt(parts[1], 10);
-            let y1 = parts[2];
-            if (y1.length === 2) {
-              y1 = '20' + y1;
-            }
-            if (m1 > 12) {
-              [d1, m1] = [m1, d1];
-            }
-            dateISO = `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
-          }
-        }
-        // Amount and tax: pick largest numbers
-        let numbers = [];
-        const numRegex = /\d+\.\d{2}/g;
-        for (const line of lines) {
-          const matches = line.match(numRegex);
-          if (matches) {
-            numbers.push(...matches.map((n) => parseFloat(n)));
-          }
-        }
-        numbers.sort((a, b) => a - b);
-        let amount = numbers.length ? numbers[numbers.length - 1] : null;
-        // Tax: look for lines with tax or gst
-        let tax = null;
-        for (const line of lines) {
-          if (/\b(gst|tax|vat)\b/i.test(line)) {
-            const m = line.match(numRegex);
-            if (m) {
-              tax = parseFloat(m[m.length - 1]);
-              break;
-            }
-          }
-        }
-        if (tax === null && amount != null) {
-          tax = parseFloat((amount * 0.1).toFixed(2));
-        }
-        return { vendor, dateISO, amount, tax };
-      }
+    async function updateLinkedFile() {
+      if (!fileHandle) return;
+      // Build workbook from entries
+      const wsData = [
+        ['Date','Vendor','Category','Amount','Tax'],
+        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax]),
+      ];
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, 'Receipts');
+      const wbout = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 
-      // Handle file upload
-      fileInput.addEventListener('change', async () => {
-        const file = fileInput.files[0];
-        if (!file) return;
-        saveBtn.disabled = true;
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const imageData = reader.result;
-          try {
-            const result = await Tesseract.recognize(imageData, 'eng');
-            const text = result.data.text;
-            const { vendor, dateISO, amount, tax } = parseReceipt(text);
-            vendorInput.value = vendor;
-            dateInput.value = dateISO;
-            amountInput.value = amount != null ? amount : '';
-            taxInput.value = tax != null ? tax : '';
-            saveBtn.disabled = false;
-            updateSaveButton();
-          } catch (err) {
-            console.error(err);
-            alert('Error during OCR. Please try again.');
-          }
-        };
-        reader.readAsDataURL(file);
-      });
+      const writable = await fileHandle.createWritable();
+      await writable.write(wbout);
+      await writable.close();
+    }
 
-      // Save entry
-      saveBtn.addEventListener('click', () => {
-        const entry = {
-          vendor: vendorInput.value.trim(),
-          date: dateInput.value,
-          amount: parseFloat(amountInput.value) || null,
-          tax: parseFloat(taxInput.value) || null,
-          category: categoryInput.value,
-        };
-        entries.push(entry);
-        saveEntries();
-        renderEntries();
-        // Clear fields
-        vendorInput.value = '';
-        dateInput.value = '';
-        amountInput.value = '';
-        taxInput.value = '';
-        categoryInput.value = 'General';
-        saveBtn.disabled = true;
-        fileInput.value = '';
-        updateSaveButton();
-      });
+    connectFileBtn.addEventListener('click', connectLocalFile);
 
-      // Export to Excel
-      exportBtn.addEventListener('click', () => {
-        if (entries.length === 0) {
-          alert('No entries to export.');
-          return;
-        }
-        const wsData = [
-          ['Date', 'Vendor', 'Category', 'Amount', 'Tax'],
-          ...entries.map((e) => [e.date, e.vendor, e.category, e.amount, e.tax]),
-        ];
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-        XLSX.utils.book_append_sheet(wb, ws, 'Receipts');
-        const wbout = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-        saveAs(blob, 'image-accountant-entries.xlsx');
-      });
+    // --- Save one entry
+    saveBtn.addEventListener('click', async () => {
+      const entry = {
+        vendor  : (vendorInput.value || '').trim(),
+        date    : dateInput.value || '',
+        amount  : amountInput.value ? Number(amountInput.value) : null,
+        tax     : taxInput.value ? Number(taxInput.value) : null,
+        category: categoryInput.value || 'General',
+      };
+      entries.push(entry);
+      saveEntries();
+      renderEntries();
 
-      // Initialize
-      loadEntries();
-    </script>
-  </body>
+      // Reset form
+      vendorInput.value = '';
+      dateInput.value = '';
+      amountInput.value = '';
+      taxInput.value = '';
+      categoryInput.value = 'General';
+      fileInput.value = '';
+      updateSaveButton();
+
+      // If linked to a local file, update it too
+      try { await updateLinkedFile(); } catch (e) { console.error(e); alert('Could not update linked file.'); }
+    });
+
+    // --- Export (download) as Excel (fallback when not linking a file)
+    exportBtn.addEventListener('click', () => {
+      if (!entries.length) { alert('No entries to export.'); return; }
+      const wsData = [
+        ['Date','Vendor','Category','Amount','Tax'],
+        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax]),
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      saveAs(new Blob([wbout], { type: 'application/octet-stream' }), 'image-accountant-entries.xlsx');
+    });
+
+    // --- Init
+    loadEntries();
+    updateSaveButton();
+  </script>
+</body>
 </html>
