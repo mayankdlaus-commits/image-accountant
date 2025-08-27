@@ -3,8 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-   <title>Image Accountant</title>> 
-
+    <title>Image Accountant</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -131,23 +130,18 @@
 
       let entries = [];
 
-      // Update the Save button state based on input fields.
-      // The Save button should be enabled when the user has manually filled out
-      // at least the vendor, date and amount fields. Previously the Save button
-      // was only enabled after an OCR file scan; this prevented manual entry.
+      // Update the Save button based on manual inputs
       function updateSaveButton() {
         const hasVendor = vendorInput.value.trim() !== '';
         const hasDate = dateInput.value !== '';
         const hasAmount = amountInput.value !== '';
-        // Enable save button if all three essential fields are provided
         saveBtn.disabled = !(hasVendor && hasDate && hasAmount);
       }
 
-      // Listen for user input on relevant fields to update the Save button.
-      [vendorInput, dateInput, amountInput].forEach(el => {
+      // Listen for user input to enable Save button manually
+      [vendorInput, dateInput, amountInput].forEach((el) => {
         el.addEventListener('input', updateSaveButton);
       });
-
 
       // Load existing entries from localStorage
       function loadEntries() {
@@ -170,7 +164,7 @@
       // Render the table
       function renderEntries() {
         entriesTableBody.innerHTML = '';
-        entries.forEach((entry, index) => {
+        entries.forEach((entry) => {
           const row = document.createElement('tr');
           row.innerHTML = `
             <td>${entry.date || ''}</td>
@@ -183,13 +177,13 @@
         });
       }
 
-      // Simple parsing of OCR text to fill fields
+      // Parse OCR text to fill fields
       function parseReceipt(text) {
         const lines = text
-          .split(/\r?\n/) // split on newline
-          .map(l => l.trim())
+          .split(/\r?\n/)
+          .map((l) => l.trim())
           .filter(Boolean);
-        // Vendor: first line with some letters and not mostly numbers
+        // Vendor: first line with letters and not mostly numbers
         let vendor = '';
         for (const line of lines) {
           if (/\D/.test(line) && line.length > 2) {
@@ -200,8 +194,8 @@
         // Date: find dd/mm/yyyy or mm/dd/yyyy or yyyy-mm-dd
         let dateMatch = null;
         const dateRegexes = [
-          /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/, // e.g., 12/08/25 or 12-08-2025
-          /(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/,    // e.g., 2025-08-12
+          /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/, // e.g. 12/08/25 or 12-08-2025
+          /(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/,   // e.g. 2025-08-12
         ];
         outer: for (const regex of dateRegexes) {
           for (const line of lines) {
@@ -214,39 +208,37 @@
         }
         let dateISO = '';
         if (dateMatch) {
-          // Normalize date to yyyy-MM-dd for input[type=date]
+          // Normalize to yyyy-MM-dd
           let parts;
           if (/\d{4}[\/-]/.test(dateMatch)) {
             parts = dateMatch.split(/[\/-]/);
             dateISO = `${parts[0].padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
           } else {
             parts = dateMatch.split(/[\/-]/);
-            // Assume day first if >12
             let d1 = parseInt(parts[0], 10);
             let m1 = parseInt(parts[1], 10);
             let y1 = parts[2];
             if (y1.length === 2) {
               y1 = '20' + y1;
             }
-            // if month > 12 then swap
             if (m1 > 12) {
               [d1, m1] = [m1, d1];
             }
             dateISO = `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
           }
         }
-        // Amount and tax: pick the largest numbers with decimals
+        // Amount and tax: pick largest numbers
         let numbers = [];
         const numRegex = /\d+\.\d{2}/g;
         for (const line of lines) {
           const matches = line.match(numRegex);
           if (matches) {
-            numbers.push(...matches.map(n => parseFloat(n)));
+            numbers.push(...matches.map((n) => parseFloat(n)));
           }
         }
         numbers.sort((a, b) => a - b);
         let amount = numbers.length ? numbers[numbers.length - 1] : null;
-        // Tax: look for lines containing tax or gst
+        // Tax: look for lines with tax or gst
         let tax = null;
         for (const line of lines) {
           if (/\b(gst|tax|vat)\b/i.test(line)) {
@@ -258,7 +250,6 @@
           }
         }
         if (tax === null && amount != null) {
-          // assume 10% tax
           tax = parseFloat((amount * 0.1).toFixed(2));
         }
         return { vendor, dateISO, amount, tax };
@@ -272,14 +263,8 @@
         const reader = new FileReader();
         reader.onload = async () => {
           const imageData = reader.result;
-          // Run OCR
           try {
-            const result = await Tesseract.recognize(imageData, 'eng', {
-              logger: m => {
-                // Optionally update progress
-                // console.log(m);
-              },
-            });
+            const result = await Tesseract.recognize(imageData, 'eng');
             const text = result.data.text;
             const { vendor, dateISO, amount, tax } = parseReceipt(text);
             vendorInput.value = vendor;
@@ -287,8 +272,8 @@
             amountInput.value = amount != null ? amount : '';
             taxInput.value = tax != null ? tax : '';
             saveBtn.disabled = false;
+            updateSaveButton();
           } catch (err) {
-               );
             console.error(err);
             alert('Error during OCR. Please try again.');
           }
@@ -316,7 +301,7 @@
         categoryInput.value = 'General';
         saveBtn.disabled = true;
         fileInput.value = '';
-        updateSaveButton();           
+        updateSaveButton();
       });
 
       // Export to Excel
@@ -327,7 +312,7 @@
         }
         const wsData = [
           ['Date', 'Vendor', 'Category', 'Amount', 'Tax'],
-          ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax]),
+          ...entries.map((e) => [e.date, e.vendor, e.category, e.amount, e.tax]),
         ];
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.aoa_to_sheet(wsData);
