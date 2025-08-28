@@ -15,7 +15,7 @@
     .hint{color:var(--muted);font-size:.9rem}
     .grid{display:grid;grid-template-columns:140px 1fr;gap:.5rem .75rem;margin-top:1rem}
     label{align-self:center;text-align:right;color:#444}
-    input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px}
+    input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px; width: 100%;}
     button{appearance:none;border:0;padding:.55rem .9rem;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
     button.secondary{background:#495057}
     button.ghost{background:#e9ecef;color:#111}
@@ -29,6 +29,18 @@
     .col{display:flex;flex-direction:column;gap:.35rem}
     .split { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .switch { display:inline-flex; align-items:center; gap:8px; }
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+      .grid { grid-template-columns: 100px 1fr; }
+      label { text-align: left; }
+    }
+    @media (max-width: 480px) {
+        h1 { font-size: 1.5rem; }
+        .grid { grid-template-columns: 1fr; }
+        label { text-align: left; margin-bottom: -0.25rem; }
+        .actions { flex-direction: column; align-items: flex-start; }
+    }
   </style>
 </head>
 <body>
@@ -37,7 +49,7 @@
 
     <div class="row actions">
       <input type="file" id="fileInput" accept="image/*"/>
-      <img id="preview" class="preview" alt=""/>
+      <img id="preview" class="preview" alt="Image preview will appear here"/>
       <div class="col">
         <progress id="ocrProgress" max="1" value="0" style="display:none"></progress>
         <span id="ocrStatus" class="hint"></span>
@@ -52,7 +64,7 @@
       <span id="linkStatus" class="hint">No linked file</span>
       <span class="switch">
         <input type="checkbox" id="preprocessToggle" checked />
-        <label for="preprocessToggle" class="hint">Preprocess before OCR (recommended)</label>
+        <label for="preprocessToggle" class="hint">Preprocess Image</label>
       </span>
     </div>
 
@@ -76,43 +88,41 @@
       </select>
     </div>
 
-    <table id="entriesTable">
-      <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Total</th><th>Tax</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div style="overflow-x:auto; margin-top: 1rem;">
+        <table id="entriesTable">
+          <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Total</th><th>Tax</th></tr></thead>
+          <tbody></tbody>
+        </table>
+    </div>
+
 
     <p class="hint" style="margin-top:.75rem">
-      OCR: API Ninjas Image-to-Text. Replace <strong>700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel</strong> below.  
-      If your Remote Desktop blocks the file picker, we auto-store a rolling Excel in the browser (OPFS), and PDF export is always available.
+      OCR powered by API Ninjas.
     </p>
   </div>
 
-  <!-- SheetJS for Excel -->
+  <!-- Third-party libraries -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.7/dist/xlsx.full.min.js"></script>
-  <!-- FileSaver for downloads -->
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-  <!-- jsPDF + AutoTable for PDF export -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 
   <script>
-    // ====== CONFIG ======
-    const API_NINJAS_KEY = '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel'; // <-- put your API Ninjas key here
+    // ====== CONFIGURATION ======
+    const API_NINJAS_KEY = '700xsqwrVIAUQMwb+YiO7Q==7xLpeBxKrShSutel';
     const API_URL = 'https://api.api-ninjas.com/v1/imagetotext';
 
-    // ====== DOM
+    // ====== DOM ELEMENT REFERENCES ======
     const fileInput       = document.getElementById('fileInput');
     const preview         = document.getElementById('preview');
     const ocrProgress     = document.getElementById('ocrProgress');
     const ocrStatus       = document.getElementById('ocrStatus');
     const preprocessToggle= document.getElementById('preprocessToggle');
-
     const vendorInput     = document.getElementById('vendorInput');
     const dateInput       = document.getElementById('dateInput');
     const amountInput     = document.getElementById('amountInput');
     const taxInput        = document.getElementById('taxInput');
     const categoryInput   = document.getElementById('categoryInput');
-
     const saveBtn         = document.getElementById('saveBtn');
     const exportBtn       = document.getElementById('exportBtn');
     const exportPdfBtn    = document.getElementById('exportPdfBtn');
@@ -120,29 +130,28 @@
     const linkStatus      = document.getElementById('linkStatus');
     const tbody           = document.querySelector('#entriesTable tbody');
 
-    // ====== Data
+    // ====== APPLICATION STATE ======
     let entries = [];
-
-    // ---- File linking state: picker / OPFS / fallback
-    let fileHandle = null;         // native picker handle
-    let opfsFileHandle = null;     // OPFS handle (browser storage)
+    let fileHandle = null;
+    let opfsFileHandle = null;
     let useOPFS = JSON.parse(localStorage.getItem('ia_use_opfs') || 'false');
 
-    // ====== UI helpers
-    function updateSaveButton() {
+    // ====== UI HELPER FUNCTIONS ======
+    function updateSaveButtonState() {
       saveBtn.disabled = !(vendorInput.value.trim() && dateInput.value && amountInput.value);
     }
-    [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButton));
 
-    function loadEntries() {
+    function loadEntriesFromStorage() {
       const raw = localStorage.getItem('image_accountant_entries');
       if (raw) { try { entries = JSON.parse(raw) || []; } catch { entries = []; } }
-      renderEntries();
+      renderEntriesTable();
     }
-    function saveEntries() {
+
+    function saveEntriesToStorage() {
       localStorage.setItem('image_accountant_entries', JSON.stringify(entries));
     }
-    function renderEntries() {
+
+    function renderEntriesTable() {
       tbody.innerHTML = '';
       for (const e of entries) {
         const tr = document.createElement('tr');
@@ -150,14 +159,14 @@
           `<td>${e.date || ''}</td>
            <td>${e.vendor || ''}</td>
            <td>${e.category || ''}</td>
-           <td>${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
-           <td>${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
+           <td style="text-align:right;">${e.amount != null ? Number(e.amount).toFixed(2) : ''}</td>
+           <td style="text-align:right;">${e.tax != null ? Number(e.tax).toFixed(2) : ''}</td>`;
         tbody.appendChild(tr);
       }
     }
 
-    // ====== Optional preprocessing (client-side) to improve OCR
-    async function preprocessToPNGBlob(imgFile) {
+    // ====== IMAGE PREPROCESSING ======
+    async function preprocessImage(imgFile) {
       const imgURL = URL.createObjectURL(imgFile);
       try {
         const img = await new Promise((res, rej) => {
@@ -165,374 +174,270 @@
         });
 
         const MAX_SIDE = 2200;
-        const w = img.naturalWidth, h = img.naturalHeight;
-        const scale = Math.min(MAX_SIDE / Math.max(w, h), 3);
-        const cw = Math.round(w * Math.max(1, scale));
-        const ch = Math.round(h * Math.max(1, scale));
+        const scale = Math.min(MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight), 3);
+        const cw = Math.round(img.naturalWidth * Math.max(1, scale));
+        const ch = Math.round(img.naturalHeight * Math.max(1, scale));
 
-        const c = document.createElement('canvas'); c.width = cw; c.height = ch;
-        const g = c.getContext('2d', { willReadFrequently: true });
-        g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-        g.drawImage(img, 0, 0, cw, ch);
+        const canvas = document.createElement('canvas');
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, cw, ch);
 
-        // grayscale + contrast stretch
-        const imgData = g.getImageData(0,0,cw,ch), d = imgData.data;
-        let min=255, max=0;
-        for (let i=0;i<d.length;i+=4){ const gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; if(gray<min)min=gray; if(gray>max)max=gray; }
-        const spread=Math.max(1,max-min);
-        for (let i=0;i<d.length;i+=4){
-          let gray=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
-          gray=(gray-min)*(255/spread); const v=gray|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+        // Grayscale and contrast stretch for better clarity
+        const imgData = ctx.getImageData(0, 0, cw, ch);
+        const d = imgData.data;
+        let min = 255, max = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const gray = d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
+          if (gray < min) min = gray;
+          if (gray > max) max = gray;
         }
-        g.putImageData(imgData,0,0);
-
-        // simple adaptive threshold
-        const src=g.getImageData(0,0,cw,ch), sd=src.data;
-        const out=g.createImageData(cw,ch), od=out.data;
-        const box=15, half=box>>1, W=cw, H=ch;
-        const S=new Uint32Array((W+1)*(H+1));
-        for(let y=1;y<=H;y++){
-          let rowsum=0, idx=y*(W+1);
-          for(let x=1;x<=W;x++){
-            const p=((y-1)*W+(x-1))<<2; rowsum+=sd[p]; S[idx+x]=S[(y-1)*(W+1)+x]+rowsum;
-          }
+        const spread = Math.max(1, max - min);
+        for (let i = 0; i < d.length; i += 4) {
+          let gray = d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
+          gray = (gray - min) * (255 / spread);
+          const v = gray | 0;
+          d[i] = d[i+1] = d[i+2] = v;
         }
-        for(let y=0;y<H;y++){
-          const y0=Math.max(0,y-half), y1=Math.min(H-1,y+half);
-          for(let x=0;x<W;x++){
-            const x0=Math.max(0,x-half), x1=Math.min(W-1,x+half);
-            const count=(x1-x0+1)*(y1-y0+1);
-            const sum=S[(y1+1)*(W+1)+(x1+1)] + S[y0*(W+1)+x0] - S[y0*(W+1)+(x1+1)] - S[(y1+1)*(W+1)+x0];
-            const mean=sum/count; const pix=sd[((y*W)+x)<<2]; const v=pix<mean*0.93?0:255;
-            const q=((y*W)+x)<<2; od[q]=od[q+1]=od[q+2]=v; od[q+3]=255;
-          }
-        }
-        g.putImageData(out,0,0);
+        ctx.putImageData(imgData, 0, 0);
 
-        const blob = await new Promise(r => c.toBlob(r, 'image/png', 0.92));
-        return blob;
+        // *** FIX: Increased JPEG compression to further reduce file size ***
+        return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.75));
       } finally {
         URL.revokeObjectURL(imgURL);
       }
     }
 
-    // ====== OCR via API Ninjas
-    async function ocrWithApiNinjas(fileOrBlob) {
+    // ====== OCR API CALL ======
+    async function performOcr(fileOrBlob) {
       if (!API_NINJAS_KEY || API_NINJAS_KEY === 'YOUR_API_KEY_HERE') {
-        throw new Error('Missing API key. Open index.html and set API_NINJAS_KEY.');
+        throw new Error('Missing API key. Please edit the script and set API_NINJAS_KEY.');
       }
-      const form = new FormData();
-      form.append('image', fileOrBlob, 'input.png'); // field name must be "image"
+      const formData = new FormData();
+      formData.append('image', fileOrBlob, 'input.jpg'); // Sending as JPG
 
-      const res = await fetch(API_URL, {
+      const response = await fetch(API_URL, {
         method: 'POST',
         headers: { 'X-Api-Key': API_NINJAS_KEY },
-        body: form
+        body: formData
       });
 
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('Unauthorized (check API key).');
-        if (res.status === 413) throw new Error('Image too large for your plan.');
-        const txt = await res.text().catch(()=> '');
-        throw new Error(`OCR error ${res.status}: ${txt || 'request failed'}`);
+      if (!response.ok) {
+        if (response.status === 401) throw new Error('Unauthorized (check your API key).');
+        if (response.status === 413) throw new Error('Image too large for your API plan.');
+        const errorText = await response.text().catch(() => 'Request failed');
+        throw new Error(`OCR error ${response.status}: ${errorText}`);
       }
-      const data = await res.json(); // [{text:"..."}, ...]
-      const fullText = Array.isArray(data) ? data.map(o => o.text || '').join('\n') : '';
-      return fullText;
+      const data = await response.json();
+      return Array.isArray(data) ? data.map(o => o.text || '').join('\n') : '';
     }
 
-    // ====== Keyword parsing (Vendor, Date, Total, Tax)
-    function parseFields(fullText){
-      const text = (fullText||'').replace(/[^\S\r\n]+/g,' ').trim();
-      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    // ====== OCR TEXT PARSING LOGIC ======
+    function parseOcrText(fullText) {
+        const text = (fullText || '').replace(/[^\S\r\n]+/g, ' ').trim();
+        const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-      // Vendor: first meaningful top line not "Invoice"
-      let vendor='';
-      for (let i=0;i<Math.min(10,lines.length);i++){
-        const l = lines[i];
-        if (/^\s*invoice\b/i.test(l)) continue;
-        if (/[A-Za-z]/.test(l) && !/^\$?\d/.test(l)) { vendor = l.replace(/\s{2,}.*/,''); break; }
-      }
+        // --- 1. Vendor Extraction ---
+        let vendor = '';
+        const nonVendorWords = /invoice|receipt|tax|inc|ltd|cash|sale|abn/i;
+        let bestVendorCandidate = '';
+        for (const line of lines.slice(0, 5)) {
+            if (line.length > 2 && line === line.toUpperCase() && !/\d/.test(line) && !nonVendorWords.test(line)) {
+                vendor = line;
+                break;
+            }
+            if (!bestVendorCandidate && /[a-z]/i.test(line) && !/^\$?[\d.,]/.test(line) && !nonVendorWords.test(line)) {
+                bestVendorCandidate = line;
+            }
+        }
+        if (!vendor) vendor = bestVendorCandidate;
+        vendor = vendor.replace(/\s{2,}.*/, '').trim();
 
-      // Date
-      const dateRegexes = [
-        /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/,
-        /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
-        /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[ ,.-]+(\d{4})\b/i,
-        /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i
-      ];
-      const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
-      let dateISO='';
-      outer: for (const rx of dateRegexes){
-        for (const l of lines){
-          const m = l.match(rx);
-          if (!m) continue;
-          if (rx===dateRegexes[0]) { const y=m[1], mo=m[2].padStart(2,'0'), d=m[3].padStart(2,'0'); dateISO=`${y}-${mo}-${d}`; break outer; }
-          if (rx===dateRegexes[1]) { let d=parseInt(m[1],10), mo=parseInt(m[2],10), y=m[3]; if(String(y).length===2) y='20'+y; if(mo>12){[d,mo]=[mo,d];} dateISO=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-          if (rx===dateRegexes[2]) { const d=m[1], mm=monthMap[m[2].slice(0,3).toLowerCase()], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
-          { const mm=monthMap[m[1].slice(0,3).toLowerCase()], d=m[2], y=m[3]; dateISO=`${y}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break outer; }
+        // --- 2. Date Extraction ---
+        const dateRegexes = [
+            /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/, // YYYY-MM-DD
+            /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/, // DD/MM/YYYY
+            /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[ ,.-]+(\d{4})\b/i, // 18 Aug 2024
+            /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i // Aug 18, 2024
+        ];
+        const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+        let dateISO = '';
+        outerDate: for (const rx of dateRegexes) {
+            for (const line of lines) {
+                const m = line.match(rx);
+                if (!m) continue;
+                if (rx === dateRegexes[0]) { dateISO = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; break outerDate; }
+                if (rx === dateRegexes[1]) { let d=m[1], mo=m[2], y=m[3]; if (y.length === 2) y = '20' + y; if (parseInt(mo,10) > 12) [d,mo]=[mo,d]; dateISO = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`; break outerDate; }
+                if (rx === dateRegexes[2]) { const mm = monthMap[m[2].slice(0,3).toLowerCase()]; dateISO = `${m[3]}-${String(mm).padStart(2, '0')}-${m[1].padStart(2, '0')}`; break outerDate; }
+                if (rx === dateRegexes[3]) { const mm = monthMap[m[1].slice(0,3).toLowerCase()]; dateISO = `${m[3]}-${String(mm).padStart(2, '0')}-${m[2].padStart(2, '0')}`; break outerDate; }
+            }
         }
-      }
 
-      const moneyRx = /(?:[\$£€]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
-      let amount=null, tax=null;
-      for (let i=lines.length-1;i>=0;i--){
-        const l = lines[i];
-        if (/total\b/i.test(l) && !/sub\s*total/i.test(l)) {
-          const ms = l.match(moneyRx);
-          if (ms?.length) { amount = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
+        // --- 3. Total and Tax Extraction ---
+        const moneyRx = /(?:[\$£€]\s*)?(\d{1,3}(?:,?\d{3})*(?:\.\d{2}))/g;
+        let amount = null;
+        let tax = null;
+
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].toLowerCase();
+            const matches = [...line.matchAll(moneyRx)];
+            if (!matches.length) continue;
+
+            const value = parseFloat(matches[matches.length - 1][1].replace(/,/g, ''));
+
+            if (amount === null && (line.includes('total') || line.includes('debit')) && !line.includes('sub') && !line.includes('item')) {
+                amount = value;
+            }
+            if (tax === null && /\b(tax|gst|vat)\b/.test(line)) {
+                tax = value;
+            }
+            if (amount !== null && tax !== null) break;
         }
-      }
-      for (const l of lines){
-        if (/\b(tax|gst|vat|mwst)\b/i.test(l)) {
-          const ms = l.match(moneyRx);
-          if (ms?.length) { tax = parseFloat(ms[ms.length-1].replace(/[^\d.]/g,'')); break; }
+        
+        if (amount === null) {
+            const nums = [];
+            for (const line of lines.slice(Math.floor(lines.length / 2))) {
+                const matches = line.match(moneyRx);
+                if (matches) nums.push(...matches.map(s => parseFloat(s.replace(/[^\d.]/g, ''))));
+            }
+            if (nums.length) amount = Math.max(...nums);
         }
-      }
-      if (amount==null){
-        const nums=[]; for (const l of lines){ const ms=l.match(moneyRx); if(ms) nums.push(...ms.map(s=>parseFloat(s.replace(/[^\d.]/g,'')))); }
-        nums.sort((a,b)=>a-b); if(nums.length) amount=nums[nums.length-1];
-      }
-      if (tax==null && amount!=null) tax = Number((amount*0.10).toFixed(2));
-      return { vendor, dateISO, amount, tax, raw:text };
+
+        if (tax === null && amount !== null) {
+            tax = Number((amount / 11).toFixed(2)); // Common calculation for GST included price
+        }
+
+        return { vendor, dateISO, amount, tax };
     }
 
-    // ====== File input → (optional preprocess) → OCR via API → parse
-    fileInput.addEventListener('change', async () => {
+    // ====== EVENT HANDLERS ======
+    async function handleFileChange() {
       const file = fileInput.files?.[0];
       if (!file) return;
 
       const url = URL.createObjectURL(file);
       preview.src = url;
+      preview.style.display = 'block';
 
       try {
-        ocrProgress.style.display=''; ocrProgress.value=0; ocrStatus.textContent='Uploading to OCR…';
-        const toSend = preprocessToggle.checked ? (await preprocessToPNGBlob(file)) : file;
+        ocrProgress.style.display = 'block';
+        ocrProgress.value = 0;
+        ocrStatus.textContent = 'Processing image...';
+        ocrStatus.className = 'hint';
 
-        const text = await ocrWithApiNinjas(toSend);
-        ocrProgress.style.display='none'; ocrStatus.textContent='';
+        const imageToSend = preprocessToggle.checked ? await preprocessImage(file) : file;
+        ocrStatus.textContent = 'Performing OCR...';
+        const text = await performOcr(imageToSend);
 
-        const { vendor, dateISO, amount, tax } = parseFields(text);
+        ocrStatus.textContent = 'Parsing results...';
+        const { vendor, dateISO, amount, tax } = parseOcrText(text);
         if (vendor) vendorInput.value = vendor;
         if (dateISO) dateInput.value = dateISO;
-        if (amount!=null) amountInput.value = amount;
-        if (tax!=null)   taxInput.value = tax;
-        updateSaveButton();
+        if (amount != null) amountInput.value = amount;
+        if (tax != null) taxInput.value = tax;
+
+        updateSaveButtonState();
+        ocrStatus.textContent = 'OCR complete.';
       } catch (e) {
         console.error(e);
-        ocrProgress.style.display='none';
-        const msg = String(e.message||e);
-        let friendly = msg;
-        if (/Missing API key/i.test(msg)) friendly = 'Add your API Ninjas key in the code (API_NINJAS_KEY).';
-        else if (/Unauthorized/i.test(msg)) friendly = 'API key rejected (401). Check your key.';
-        else if (/Image too large/i.test(msg)) friendly = 'Image too large for your plan. Try a smaller image.';
-        ocrStatus.textContent = friendly;
+        ocrStatus.textContent = `Error: ${e.message}`;
         ocrStatus.className = 'hint bad';
-        alert('OCR failed: ' + friendly);
       } finally {
+        ocrProgress.style.display = 'none';
         URL.revokeObjectURL(url);
       }
-    });
-
-    // ====== Linking/Storage: Picker → OPFS → Auto-download
-    let _xlsxWriteLock = Promise.resolve();
-    function _queueWrite(task) {
-      const run = _xlsxWriteLock.then(task, task);
-      _xlsxWriteLock = run.catch(() => {}); // keep chain alive
-      return run;
-    }
-    function fsSupported(){ return 'showSaveFilePicker' in window; }
-    function opfsSupported(){ return !!(navigator.storage && navigator.storage.getDirectory); }
-
-    async function ensureOPFSFile() {
-      const year = new Date().getFullYear();
-      const root = await navigator.storage.getDirectory();
-      const appDir = await root.getDirectoryHandle('image-accountant', { create: true });
-      opfsFileHandle = await appDir.getFileHandle(`entries-${year}.xlsx`, { create: true });
-      useOPFS = true;
-      localStorage.setItem('ia_use_opfs', 'true');
-    }
-    async function writeOPFS(blob) {
-      if (!opfsFileHandle) await ensureOPFSFile();
-      const ws = await opfsFileHandle.createWritable();
-      try {
-        await ws.truncate(0);
-        await ws.write(blob);
-      } finally {
-        await ws.close();
-      }
-    }
-    function setLinkStatus(){
-      if (fileHandle) {
-        linkStatus.textContent = 'Linked ✔ (picker)';
-        linkStatus.className = 'hint ok';
-        connectFileBtn.style.display = '';
-        return;
-      }
-      if (useOPFS && opfsSupported()) {
-        linkStatus.textContent = 'Linked ✔ (browser storage)';
-        linkStatus.className = 'hint ok';
-        connectFileBtn.style.display = '';
-        return;
-      }
-      if (!fsSupported() && !opfsSupported()) {
-        linkStatus.textContent = 'No linking available (will auto-download on save)';
-        linkStatus.className = 'hint warn';
-        connectFileBtn.style.display = 'none';
-      } else {
-        linkStatus.textContent = 'No linked file';
-        linkStatus.className = 'hint';
-        connectFileBtn.style.display = '';
-      }
-    }
-    async function connectLocalFile(){
-      connectFileBtn.disabled = true;
-      try{
-        if (fsSupported()) {
-          try {
-            fileHandle = await window.showSaveFilePicker({
-              suggestedName:'image-accountant-entries.xlsx',
-              types:[{description:'Excel', accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]
-            });
-            useOPFS = false;
-            localStorage.setItem('ia_use_opfs','false');
-            alert('Linked a local Excel with the system picker.');
-          } catch (err) {
-            const name = err && (err.name || '');
-            const blocked = name === 'SecurityError' || name === 'NotAllowedError';
-            if (blocked && opfsSupported()) {
-              await ensureOPFSFile();
-              alert('System picker blocked. Using browser storage (OPFS) instead.');
-            } else if (name === 'AbortError') {
-              // user cancelled; do nothing
-            } else {
-              console.error(err);
-              alert('Could not link file: ' + (err.message || err));
-            }
-          }
-        } else if (opfsSupported()) {
-          await ensureOPFSFile();
-          alert('Using browser storage (OPFS).');
-        } else {
-          alert('Linking not supported in this browser. We will auto-download on each save.');
-        }
-      } finally {
-        connectFileBtn.disabled = false;
-        setLinkStatus();
-        await updateLinkedFile(); // create/update immediately
-      }
-    }
-    connectFileBtn.addEventListener('click', connectLocalFile);
-
-    function buildXlsxBlob() {
-      const wsData = [['Date','Vendor','Category','Amount','Tax'],
-        ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
-      const ab = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-      return new Blob([ab], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      });
     }
 
-    async function updateLinkedFile(){
-      return _queueWrite(async () => {
-        const blob = buildXlsxBlob();
-        try {
-          if (fileHandle) {
-            const w = await fileHandle.createWritable();
-            try { await w.truncate(0); await w.write(blob); } finally { await w.close(); }
-            return;
-          }
-          if (useOPFS && opfsSupported()) { await writeOPFS(blob); return; }
-        } catch (err) { console.error('Writing linked file failed:', err); }
-        saveAs(blob, 'image-accountant-entries.xlsx'); // last resort
-      });
-    }
-
-    // ====== Save & Export (Excel + PDF)
-    saveBtn.addEventListener('click', async () => {
+    function handleSaveEntry() {
       const entry = {
-        vendor:(vendorInput.value||'').trim(),
-        date: dateInput.value||'',
+        vendor: (vendorInput.value || '').trim(),
+        date: dateInput.value || '',
         amount: amountInput.value ? Number(amountInput.value) : null,
         tax: taxInput.value ? Number(taxInput.value) : null,
-        category: categoryInput.value||'General'
+        category: categoryInput.value || 'General'
       };
       entries.push(entry);
-      saveEntries();
-      renderEntries();
+      saveEntriesToStorage();
+      renderEntriesTable();
 
-      vendorInput.value=''; dateInput.value=''; amountInput.value='';
-      taxInput.value=''; categoryInput.value='General'; fileInput.value=''; preview.src='';
-      updateSaveButton();
-
-      try{ await updateLinkedFile(); }catch(e){ console.error(e); alert('Could not update linked file.'); }
-    });
-
-    exportBtn.addEventListener('click', () => {
-      if (!entries.length){ alert('No entries to export.'); return; }
-      const blob = buildXlsxBlob();
-      saveAs(blob, 'image-accountant-entries.xlsx');
-    });
-
-    // NEW: Export to PDF (summary table + totals)
-    exportPdfBtn.addEventListener('click', () => {
-      if (!entries.length){ alert('No entries to export.'); return; }
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-
-      const title = 'Image Accountant — Receipts Summary';
-      doc.setFont('helvetica','bold'); doc.setFontSize(14);
-      doc.text(title, 40, 40);
-
-      // table data
-      const body = entries.map(e => [
-        e.date || '',
-        e.vendor || '',
-        e.category || '',
-        (e.amount!=null ? Number(e.amount).toFixed(2) : ''),
-        (e.tax!=null ? Number(e.tax).toFixed(2) : '')
-      ]);
-      const totalAmount = entries.reduce((s,e)=> s + (Number(e.amount)||0), 0);
-      const totalTax    = entries.reduce((s,e)=> s + (Number(e.tax)||0), 0);
-
-      doc.autoTable({
-        startY: 60,
-        head: [['Date','Vendor','Category','Total','Tax']],
-        body,
-        styles: { fontSize: 9, cellPadding: 6 },
-        headStyles: { fillColor: [238,242,247], textColor: 20 },
-        columnStyles: {
-          3: { halign: 'right' },
-          4: { halign: 'right' }
-        },
-        didDrawPage: (data) => {
-          doc.setFont('helvetica','normal'); doc.setFontSize(8);
-          const page = doc.internal.getNumberOfPages();
-          doc.text(`Page ${page}`, doc.internal.pageSize.getWidth()-60, doc.internal.pageSize.getHeight()-20);
-        }
-      });
-
-      // Totals footer
-      const y = doc.lastAutoTable.finalY + 20;
-      doc.setFont('helvetica','bold'); doc.setFontSize(11);
-      doc.text(`Total (Amount): ${totalAmount.toFixed(2)}`, 40, y);
-      doc.text(`Total (Tax): ${totalTax.toFixed(2)}`, 40, y + 16);
-
-      doc.save('image-accountant-entries.pdf');
-    });
-
-    // ====== Init
-    async function init(){
-      loadEntries();
-      updateSaveButton();
-      if (useOPFS && opfsSupported()) {
-        try { await ensureOPFSFile(); } catch(e){ console.warn('OPFS init failed', e); }
-      }
-      setLinkStatus();
+      // Reset form fields
+      vendorInput.value = '';
+      dateInput.value = '';
+      amountInput.value = '';
+      taxInput.value = '';
+      categoryInput.value = 'General';
+      fileInput.value = '';
+      preview.src = '';
+      preview.style.display = 'none';
+      ocrStatus.textContent = '';
+      updateSaveButtonState();
     }
-    init();
+
+    function handleExportXLSX() {
+        if (!entries.length) return;
+        const wsData = [['Date', 'Vendor', 'Category', 'Amount', 'Tax'],
+            ...entries.map(e => [e.date, e.vendor, e.category, e.amount, e.tax])];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Receipts');
+        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        saveAs(new Blob([wbout], { type: 'application/octet-stream' }), 'receipts.xlsx');
+    }
+
+    function handleExportPDF() {
+        if (!entries.length) return;
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('Receipts Summary', 40, 40);
+
+        const body = entries.map(e => [
+            e.date || '', e.vendor || '', e.category || '',
+            e.amount != null ? Number(e.amount).toFixed(2) : '',
+            e.tax != null ? Number(e.tax).toFixed(2) : ''
+        ]);
+        const totalAmount = entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        const totalTax = entries.reduce((sum, e) => sum + (Number(e.tax) || 0), 0);
+
+        doc.autoTable({
+            startY: 60,
+            head: [['Date', 'Vendor', 'Category', 'Total', 'Tax']],
+            body: body,
+            theme: 'grid',
+            headStyles: { fillColor: [22, 160, 133], textColor: 255 },
+            columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' } }
+        });
+
+        const finalY = doc.lastAutoTable.finalY + 20;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text(`Total Amount: ${totalAmount.toFixed(2)}`, 40, finalY);
+        doc.text(`Total Tax: ${totalTax.toFixed(2)}`, 40, finalY + 16);
+
+        doc.save('receipts-summary.pdf');
+    }
+
+    // ====== INITIALIZATION ======
+    function initialize() {
+      // Attach event listeners
+      fileInput.addEventListener('change', handleFileChange);
+      saveBtn.addEventListener('click', handleSaveEntry);
+      exportBtn.addEventListener('click', handleExportXLSX);
+      exportPdfBtn.addEventListener('click', handleExportPDF);
+      [vendorInput, dateInput, amountInput].forEach(el => el.addEventListener('input', updateSaveButtonState));
+
+      // Load initial data
+      loadEntriesFromStorage();
+      updateSaveButtonState();
+    }
+
+    // Run the app
+    initialize();
+
   </script>
 </body>
 </html>
